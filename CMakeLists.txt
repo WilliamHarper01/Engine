@@ -3,12 +3,15 @@ cmake_minimum_required(VERSION 3.10)
 # set the project name
 project(Engine)
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/$<0:>)
+configure_file(config.h.in config.h)
+
 # specify the C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # add the executable
-add_executable(Engine 
+add_executable(Engine
 	audio.h
 	audio.cpp
 	vulkan.h
@@ -16,6 +19,9 @@ add_executable(Engine
 	vulkan.cpp
 	main.cpp
 )
+
+#add config
+target_include_directories(Engine PUBLIC "${PROJECT_BINARY_DIR}")
 
 #add Vulkan to the project
 find_package(Vulkan REQUIRED)

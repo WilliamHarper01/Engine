@@ -1417,11 +1417,15 @@ bool checkValidationLayerSupport() {
 }
 
 static std::vector<char> readFile(const std::string& filename) {
-    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+    std::ifstream file(ROOTPATH + filename, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
-        std::cout << "filename: " << filename << "\n";
-        throw std::runtime_error("failed to open file!");
+        file.open(filename, std::ios::ate | std::ios::binary);
+
+        if (!file.is_open()) {
+            std::cout << "filename: " << filename << "\n";
+            throw std::runtime_error("failed to open file!");
+        }
     }
 
     size_t fileSize = (size_t)file.tellg();
@@ -1787,6 +1791,9 @@ VkTexture::VkTexture(std::string filename)
     stbi_uc* pixels = stbi_load(filename.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 
     if (!pixels) {
+        std::string altFilename = ROOTPATH + filename;
+
+        stbi_load(altFilename.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         throw std::runtime_error("failed to load texture image!");
     }
 
@@ -1898,7 +1905,11 @@ VkMesh::VkMesh(std::string filename)
     std::string warn, err;
 
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename.c_str())) {
-        throw std::runtime_error(warn + err);
+        
+        std::string altFilename = ROOTPATH + filename;
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, altFilename.c_str())) {
+            throw std::runtime_error(warn + err);
+        }
     }
     
     //vertices.reserve(attrib.vertices.size()/3);
@@ -2165,8 +2176,12 @@ void Font::createFont(std::string filename, std::vector<int> extraChars)
 
     FT_Face face;
     error = FT_New_Face(library, filename.c_str(), 0, &face);
-    if (error)
-        throw std::runtime_error("could not create font face");
+    if (error) {
+        std::string altFilename = ROOTPATH + filename;
+        error = FT_New_Face(library, altFilename.c_str(), 0, &face);
+        if (error)
+            throw std::runtime_error("could not create font face");
+    }
 
     error = FT_Set_Pixel_Sizes(face, 0, fontSize);
     if (error)

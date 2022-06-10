@@ -5,7 +5,12 @@ int main()
 {
 	createWindow();
 	initVulkan();
-	startAudio();
+	//startAudio();
+
+	do
+	{
+	
+	} while (renderFrame());
 
 	cleanVulkan();
 }

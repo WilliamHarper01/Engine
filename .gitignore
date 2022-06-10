@@ -31,6 +31,9 @@
 *.out
 *.app
 
+#VS trash
+*.pdb
+
 # CMake
 
 CMakeLists.txt.user

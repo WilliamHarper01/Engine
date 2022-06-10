@@ -1,0 +1,1 @@
+#define ROOTPATH "@CMAKE_SOURCE_DIR@/"
