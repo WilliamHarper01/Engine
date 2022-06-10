@@ -22,12 +22,12 @@ target_link_directories(Engine PRIVATE extern/glfw/src)
 target_link_libraries(Engine glfw)
 
 #add Vulkan Memory Allocator to the project
-add_subdirectory(extern/VulkanMemoryAllocator)
 target_include_directories(Engine PUBLIC extern/VulkanMemoryAllocator/include)
 
 #add OpenAL to the project
-find_package(OpenAL REQUIRED)
-target_include_directories(Engine PUBLIC ${OPENAL_INCLUDE_DIR})
-target_link_libraries(Engine ${OPENAL_LIBRARY})
+add_subdirectory(extern/openal-soft)
+target_include_directories(Engine PUBLIC extern/openal-soft/include)
+target_link_directories(Engine PRIVATE extern/openal-soft)
+target_link_libraries(Engine OpenAL32)
 
 
