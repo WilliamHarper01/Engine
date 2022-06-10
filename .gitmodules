@@ -4,3 +4,6 @@
 [submodule "extern/VulkanMemoryAllocator"]
 	path = extern/VulkanMemoryAllocator
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "extern/openal-soft"]
+	path = extern/openal-soft
+	url = https://github.com/kcat/openal-soft.git
