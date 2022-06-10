@@ -1,16 +1,11 @@
-#include <iostream>
-
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+#include "graphics.h"	//a front-end for everything graphics related
+#include "audio.h"		//a front-end for everything audio related
 
 int main()
 {
-	GLFWwindow* window;
-	glfwInit();
-	window = glfwCreateWindow(1920, 1080, "bruh", NULL, NULL);
-	VkInstance i;
-	vkCreateInstance(nullptr, nullptr, &i);
-	
-	std::cout << "test\n";
-	return 0;
+	createWindow();
+	initVulkan();
+	startAudio();
+
+	cleanVulkan();
 }
