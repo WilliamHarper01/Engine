@@ -12,12 +12,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # add the executable
 add_executable(Engine
-	audio.h
-	audio.cpp
-	vulkan.h
-	graphics.h
-	vulkan.cpp
-	main.cpp
+	src/audio.h
+	src/audio.cpp
+	src/vulkan.h
+	src/vulkan.cpp
+	src/graphics.h
+	src/physics.h
+	src/physics.cpp
+	src/main.cpp
 )
 
 #add config
