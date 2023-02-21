@@ -4,7 +4,7 @@
 #include <al.h>
 #include <alc.h>
 
-ALCdevice* device;
+ALCdevice* aDevice;
 ALCcontext* Context;
 ALboolean g_bEAX;
 
@@ -16,9 +16,9 @@ int startAudio()
 {
 	alGetError();
 	//alcGetString(NULL, ALC_DEVICE_SPECIFIER);
-	device = alcOpenDevice(nullptr);
-	if (device) {
-		Context = alcCreateContext(device, nullptr);
+	aDevice = alcOpenDevice(nullptr);
+	if (aDevice) {
+		Context = alcCreateContext(aDevice, nullptr);
 		alcMakeContextCurrent(Context);
 	}
 	g_bEAX = alIsExtensionPresent("EAX2.0");
@@ -55,7 +55,7 @@ void cleanAudio()
 {
 	alcMakeContextCurrent(nullptr);
 	alcDestroyContext(Context);
-	alcCloseDevice(device);
+	alcCloseDevice(aDevice);
 }
 
 AudioSource::~AudioSource()
@@ -96,7 +96,7 @@ void AudioSource::loadAudio(WAV& wav)
 		format = AL_FORMAT_STEREO16;
 		break;
 	default:
-		throw std::exception("unsupported channel count");
+		throw std::runtime_error("unsupported channel count");
 	}
 
 	int size = wav.data.size() * 2;

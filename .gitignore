@@ -49,3 +49,8 @@ CTestTestfile.cmake
 _deps
 
 Build
+
+Engine
+alrecord
+altonegen
+openal-info
