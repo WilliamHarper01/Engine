@@ -54,3 +54,6 @@ Engine
 alrecord
 altonegen
 openal-info
+
+*.mp3
+*.wav
