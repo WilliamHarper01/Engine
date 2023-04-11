@@ -1,6 +1,8 @@
 #include "graphics.h"
 #include "vulkan.h"
 
+Color clearColor = {1.0f, 1.0f, 1.0f, 1.0f};
+
 std::vector<Render*> objects = {};
 V3 cameraPos(-1.0f, 0.0f, 0.70f);
 V3 cameraLook(1.0f, 0.0f, 0.0f);
@@ -16,6 +18,24 @@ void createWindow() {
 
 static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
     framebufferResized = true;
+}
+
+void screenToWorld(double * x, double * y)
+{
+    int width, height;
+    glfwGetWindowSize(window, &width, &height);
+
+    *x = (*x)/((double)width)-0.5;
+    *y = (*y)/((double)width)-(height/(float)width/2.0f);
+}
+
+bool checkInside(double dx, double dy, double sx, double sy, double sw, double sh)
+{
+    glm::vec2 d = {dx, dy};
+    glm::vec2 s = {sx, sy};
+    if (glm::length(d - s) < sw)
+        return true;
+    return false;
 }
 
 void initVulkan() {
@@ -70,6 +90,13 @@ void initVulkan() {
 
 bool renderFrame() {
     
+    static bool mouseLeftPressed = false;
+    int mouseLeft = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+    double cx, cy;
+    glfwGetCursorPos(window, &cx, &cy);
+    screenToWorld(&cx, &cy);
+    //printf("%3.3f, %3.3f\n", cx, cy);
+    
     for (Render* i : objects)
     {
         if (i->is3d)
@@ -90,8 +117,18 @@ bool renderFrame() {
             r->transform.pos = glm::vec2(i->pos.x, i->pos.y);
             r->transform.depth = i->pos.z;
             r->transform.size = glm::vec2(i->scale.x, i->scale.y);
+            r->transform.color = {i->color.r, i->color.g, i->color.b, i->color.a};
+            if (mouseLeftPressed == false && mouseLeft == GLFW_PRESS && i->onClick != nullptr
+                && checkInside(cx, cy, i->pos.x, i->pos.y, i->scale.x, i->scale.y)) {
+                i->onClick(i);
+            }
         }
     }
+
+    if (mouseLeft == GLFW_PRESS)
+        mouseLeftPressed = true;
+    else if (mouseLeft == GLFW_RELEASE)
+        mouseLeftPressed = false;
 
     if (!glfwWindowShouldClose(window)) {
         drawFrame();
@@ -850,7 +887,7 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     renderPassInfo.renderArea.extent = swapChainExtent;
 
     std::vector<VkClearValue> clearValues(2);
-    clearValues[0].color = { {0.1f, 0.1f, 0.1f, 1.0f} };
+    clearValues[0].color = { {clearColor.r, clearColor.g, clearColor.b, 1.0f} };
     clearValues[1].depthStencil = { 1.0f, 0 };
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
     renderPassInfo.pClearValues = clearValues.data();
@@ -1504,6 +1541,7 @@ VkUBO::VkUBO()
     rot = 0.0f;
     depth = 1.0f;
     cameraPos = { 0.0f, 0.0f };
+    color = {1.0f, 1.0f, 1.0f, 1.0f};
 }
 
 VkRender::VkRender(VkTexture* tex)
@@ -2261,7 +2299,7 @@ void Font::createFont(std::string filename, std::vector<int> extraChars)
     renderPassInfo.renderArea.extent = extent;
 
     std::vector<VkClearValue> clearValues(1);
-    clearValues[0].color = { {0.0f, 0.0f, 0.0f, 0.0f} };
+    clearValues[0].color = { {1.0f, 1.0f, 1.0f, 0.0f} };
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
     renderPassInfo.pClearValues = clearValues.data();
 

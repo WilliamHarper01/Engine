@@ -99,6 +99,7 @@ public:
     float rot;
     float depth;
     glm::vec2 cameraPos;
+    glm::vec4 color;
     VkUBO();
 };
 

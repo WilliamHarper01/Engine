@@ -7,6 +7,7 @@ layout(binding = 0) uniform UniformBufferObject {
 	float rot;
     float fov;
 	vec2 cameraPos;
+	vec4 color;
 
 } ubo;
 
@@ -14,6 +15,7 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inTexCoord;
 
 layout(location = 0) out vec2 fragTexCoord;
+layout(location = 1) out vec4 fragColor;
 
 void main() {
     
@@ -32,6 +34,7 @@ void main() {
 
 	gl_Position = vec4(movedObj + scaledObj, 0.0, 1.0);
     fragTexCoord = vec2(inTexCoord.x, inTexCoord.y);
+	fragColor = ubo.color;
 
     //gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
     
