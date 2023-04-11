@@ -1880,7 +1880,7 @@ void VkTexture::loadImage(stbi_uc* pixels, int texWidth, int texHeight, int texC
         format = VK_FORMAT_R8G8B8A8_SRGB;
         break;
     default:
-        throw std::exception("invalid format for texture");
+        throw std::runtime_error("invalid format for texture");
     }
 
     createImage(texWidth, texHeight, format, VK_IMAGE_TILING_OPTIMAL,
@@ -2233,8 +2233,8 @@ void Font::createFont(std::string filename, std::vector<int> extraChars)
 
     VkTexture* texture = new VkTexture();
 
-    int imageWidth = fontSize * ((int)sqrt(extraChars.size()) + 1);
-    int imageHeight = imageWidth;
+    uint32_t imageWidth = fontSize * ((int)sqrt(extraChars.size()) + 1);
+    uint32_t imageHeight = imageWidth;
     VkExtent2D extent = { imageWidth, imageHeight };
     auto imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
