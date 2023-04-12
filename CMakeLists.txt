@@ -17,6 +17,7 @@ add_executable(Engine
 	src/vulkan.h
 	src/vulkan.cpp
 	src/graphics.h
+	src/graphics.cpp
 	src/physics.h
 	src/physics.cpp
 	src/main.cpp

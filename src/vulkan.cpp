@@ -7,6 +7,16 @@ std::vector<Render*> objects = {};
 V3 cameraPos(-1.0f, 0.0f, 0.70f);
 V3 cameraLook(1.0f, 0.0f, 0.0f);
 
+void V3::print()
+{
+    printf("%3.3f, %3.3f, %3.3f\n", x, y, z);
+}
+
+void Color::print()
+{
+    printf("%3.3f, %3.3f, %3.3f, %3.3f\n", r, g, b, a);
+}
+
 void createWindow() {
     glfwInit();
 
@@ -31,11 +41,25 @@ void screenToWorld(double * x, double * y)
 
 bool checkInside(double dx, double dy, double sx, double sy, double sw, double sh)
 {
-    glm::vec2 d = {dx, dy};
-    glm::vec2 s = {sx, sy};
-    if (glm::length(d - s) < sw)
-        return true;
-    return false;
+    sw /= 2.0;
+    sh /= 2.0;
+
+    double xmin = sx - sw;
+    double xmax = sx + sw;
+
+    double ymin = sy - sh;
+    double ymax = sy + sh;
+
+    if (dx < xmin)
+        return false;
+    if (dx > xmax)
+        return false;
+    if (dy < ymin)
+        return false;
+    if (dy > ymax)
+        return false;
+
+    return true;
 }
 
 void initVulkan() {
@@ -91,7 +115,9 @@ void initVulkan() {
 bool renderFrame() {
     
     static bool mouseLeftPressed = false;
+    static bool mouseRightPressed = false;
     int mouseLeft = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+    int mouseRight = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
     double cx, cy;
     glfwGetCursorPos(window, &cx, &cy);
     screenToWorld(&cx, &cy);
@@ -120,7 +146,11 @@ bool renderFrame() {
             r->transform.color = {i->color.r, i->color.g, i->color.b, i->color.a};
             if (mouseLeftPressed == false && mouseLeft == GLFW_PRESS && i->onClick != nullptr
                 && checkInside(cx, cy, i->pos.x, i->pos.y, i->scale.x, i->scale.y)) {
-                i->onClick(i);
+                i->onClick(i, MOUSE_LEFT);
+            }
+            if (mouseRightPressed == false && mouseRight == GLFW_PRESS && i->onClick != nullptr
+                && checkInside(cx, cy, i->pos.x, i->pos.y, i->scale.x, i->scale.y)) {
+                i->onClick(i, MOUSE_RIGHT);
             }
         }
     }
@@ -129,6 +159,11 @@ bool renderFrame() {
         mouseLeftPressed = true;
     else if (mouseLeft == GLFW_RELEASE)
         mouseLeftPressed = false;
+
+    if (mouseRight == GLFW_PRESS)
+        mouseRightPressed = true;
+    else if (mouseRight == GLFW_RELEASE)
+        mouseRightPressed = false;
 
     if (!glfwWindowShouldClose(window)) {
         drawFrame();

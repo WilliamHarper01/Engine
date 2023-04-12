@@ -7,12 +7,12 @@
     #include "spectrum.cpp"
 #endif
 
-int main()
+int main(int argc, char** argv)
 {
     try
     {
         #ifdef SNES
-            snesGraphicsEditor();
+            snesGraphicsEditor(argc, argv);
         #endif 
         #ifdef SPECTRUM
             spectrum();

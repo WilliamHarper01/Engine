@@ -13,6 +13,9 @@
 #include <set>
 #include <unordered_map>
 
+#define MOUSE_LEFT 1
+#define MOUSE_RIGHT 2
+
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
 
@@ -26,32 +29,18 @@ struct V3 {
 	float x, y, z;
 	V3() : x(0.0f), y(0.0f), z(0.0f) {}
 	V3(float x, float y, float z) : x(x), y(y), z(z) {}
+	void print();
 };
 
 struct Color{
 	float r, g, b, a;
 	Color() : r(1.0f), g(1.0f), b(1.0f), a(1.0f) {}
 	Color(float r, float g, float b, float a) : r(r), g(g), b(b), a(a) {}
-	short to5Bit()
-	{
-		short result = 0;
-		result = ((short)(b*31.0f));
-		result = result << 5;
-		result += ((short)(g*31.0f));
-		result = result << 5;
-		result += ((short)(r*31.0f));
-		return result;
-	}
-	void from5Bit(short color)
-	{
-		r = (color & 0b11111)/(float)0b11111;
-		g = ((color >> 5) & 0b11111)/(float)0b11111;
-		b = ((color >> 10) & 0b11111)/(float)0b11111;
-
-		r = std::min(r, 1.0f);
-		g = std::min(g, 1.0f);
-		b = std::min(b, 1.0f);
-	}
+	short to5Bit();
+	void from5Bit(short color);
+	void from5BitHSV(short hsv);
+	short to5BitHSV(); //in format 0b0vvvvvssssshhhhh
+	void print();
 };
 
 extern Color clearColor;
@@ -96,7 +85,7 @@ public:
 	V3 pos, rot, scale;
 	Color color;
 	void* handle;
-	void (*onClick)(Render *) = nullptr;
+	void (*onClick)(Render *, int) = nullptr;
 	~Render();
 	void create(Mesh& mesh, Texture& tex);
 	void create(Texture& tex);
