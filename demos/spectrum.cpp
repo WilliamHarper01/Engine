@@ -71,68 +71,63 @@ Complex sub[WAVELENGTH_SUB];
 int s;
 Render r[BARS];
 
-int spectrum(int argc, char** argv) {
+int spectrum(int argc, char** argv) 
+{
+	if (argc <= 1){
+		perror("no wav file given\n");
+		exit(1);
+	}
+	
+	startAudio();
+	WAV wav;
+	wav.load(argv[1]);
+	AudioSource a;
+	a.init(wav);
+	
+	createWindow();
+	
+	initVulkan();
 
-    try{
-        startAudio();
-		WAV wav;
-		wav.load("BOYFRIEND.wav");
-		AudioSource a;
-		a.init(wav);
-		
-		createWindow();
-        
-        initVulkan();
+	Texture t;
+	t.create("white.png");
 
-		Texture t;
-		t.create("red.png");
+	for (int i = 0; i < BARS; i++)
+	{
+		r[i].create(t);
+		r[i].scale = V3( 1 / (float)BARS, 1.0f, 0.0f );
+		r[i].pos = V3( (-0.5f + 0.5 / (float)BARS) + (i * (1 / (float)BARS)), 0.75f , 1.0f);
+		r[i].color = {0.0f, 1.0f, 1.0f, 1.0f};
+	}
+	
+	a.play();
+	double timeStart = currTime();
 
-        for (int i = 0; i < BARS; i++)
-        {
-			r[i].create(t);
-			r[i].scale = V3( 1 / (float)BARS, 1.0f, 0.0f );
-            r[i].pos = V3( (-0.5f + 0.5 / (float)BARS) + (i * (1 / (float)BARS)), 0.75f , 1.0f);
-        }
-		
-		a.play();
-		double timeStart = currTime();
+	while (renderFrame())
+	{
+		double cTime = currTime() - timeStart;
+		s = (int)(44100.0 * cTime);
 
-		while (renderFrame())
-		{
-			double cTime = currTime() - timeStart;
-			s = (int)(44100.0 * cTime);
-
-			if (wav.data.size() / 2 > WAVELENGTH_SUB + s) {
-				
-				for (int i = 0; i < WAVELENGTH_SUB; i++)
-				{
-					sub[i] = wav.data[(i + s) * 2] / 32767.0f;
-				}
-				
-				CArray data(sub, WAVELENGTH_SUB);
-				fftMag(data);
-
-				for (int i = 0; i < BARS; i++)
-				{
-					float ampl = data[i+1].real();
-					//ampl = 20 * log10(ampl);
-					r[i].pos.y = 0.75f - (float)(ampl * 0.0005f);
-				}
-
+		if (wav.data.size() / 2 > WAVELENGTH_SUB + s) {
+			
+			for (int i = 0; i < WAVELENGTH_SUB; i++)
+			{
+				sub[i] = wav.data[(i + s) * 2] / 32767.0f;
 			}
 			
+			CArray data(sub, WAVELENGTH_SUB);
+			fftMag(data);
+
+			for (int i = 0; i < BARS; i++)
+			{
+				float ampl = data[i+1].real();
+				//ampl = 20 * log10(ampl);
+				r[i].pos.y = 0.75f - (float)(ampl * 0.0005f);
+			}
+
 		}
+		
+	}
 
-        cleanVulkan();
-    }
-    catch (const std::exception& e) {
-        std::cerr << e.what() << std::endl;
-        return EXIT_FAILURE;
-    }
-
-	//a.stop();
-	//cleanAudio();
-
-    return EXIT_SUCCESS;
+	cleanVulkan();
 }
 

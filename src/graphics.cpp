@@ -24,123 +24,66 @@ short Color::to5Bit()
     return result;
 }
 
+//source: https://gist.github.com/postspectacular/2a4a8db092011c6743a7
+
+float fract(float x) { return x - int(x); }
+
+float mix(float a, float b, float t) { return a + (b - a) * t; }
+
+float step(float e, float x) { return x < e ? 0.0 : 1.0; }
+
 void Color::from5BitHSV(short hsv)
 {
-    V3 in;
-    in.x = (hsv & 0b11111)/(float)0b11111;
-    in.y = ((hsv >> 5) & 0b11111)/(float)0b11111;
-    in.z = ((hsv >> 10) & 0b11111)/(float)0b11111;
+    float h, s, v;
+    h = (hsv & 0b11111)/(float)0b11111;
+    s = ((hsv >> 5) & 0b11111)/(float)0b11111;
+    v = ((hsv >> 10) & 0b11111)/(float)0b11111;
 
-    in.x = std::min(in.x, 1.0f);
-    in.y = std::min(in.x, 1.0f);
-    in.z = std::min(in.x, 1.0f);
+    h = std::min(h, 1.0f);
+    s = std::min(s, 1.0f);
+    v = std::min(v, 1.0f);
 
     a = 1.0f;
     
-    double      hh, p, q, t, ff;
-    long        i;
-
-
-    if(in.y <= 0.0) {       // < is bogus, just shuts up warnings
-        r = in.z;
-        g = in.z;
-        b = in.z;
-        return;
-    }
-    hh = in.x;
-    if(hh >= 360.0) hh = 0.0;
-    hh /= 60.0;
-    i = (long)hh;
-    ff = hh - i;
-    p = in.z * (1.0 - in.y);
-    q = in.z * (1.0 - (in.y * ff));
-    t = in.z * (1.0 - (in.y * (1.0 - ff)));
-
-    switch(i) {
-    case 0:
-        r = in.z;
-        g = t;
-        b = p;
-        break;
-    case 1:
-        r = q;
-        g = in.z;
-        b = p;
-        break;
-    case 2:
-        r = p;
-        g = in.z;
-        b = t;
-        break;
-
-    case 3:
-        r = p;
-        g = q;
-        b = in.z;
-        break;
-    case 4:
-        r = t;
-        g = p;
-        b = in.z;
-        break;
-    case 5:
-    default:
-        r = in.z;
-        g = p;
-        b = q;
-        break;
-    }
-    
-      
+    r = v * mix(1.0, std::min(std::max(abs(fract(h + 1.0000000) * 6.0 - 3.0) - 1.0, 0.0), 1.0), s);
+    g = v * mix(1.0, std::min(std::max(abs(fract(h + 0.6666666) * 6.0 - 3.0) - 1.0, 0.0), 1.0), s);
+    b = v * mix(1.0, std::min(std::max(abs(fract(h + 0.3333333) * 6.0 - 3.0) - 1.0, 0.0), 1.0), s);
 }
 
 short Color::to5BitHSV()
 {
-    V3 out;
-    double      min, max, delta;
+    float hue, sat, val;
+    
+    float s = step(b, g);
+    float px = mix(b, g, s);
+    float py = mix(g, b, s);
+    float pz = mix(-1.0, 0.0, s);
+    float pw = mix(0.6666666, -0.3333333, s);
+    s = step(px, r);
+    float qx = mix(px, r, s);
+    float qz = mix(pw, pz, s);
+    float qw = mix(r, px, s);
+    float d = qx - std::min(qw, py);
+    hue = abs(qz + (qw - py) / (6.0 * d + 1e-10));
+    sat = d / (qx + 1e-10);
+    val = qx;
 
-    min = r < g ? r : g;
-    min = min  < b ? min  : b;
-
-    max = r > g ? r : g;
-    max = max  > b ? max  : b;
-
-    out.z = max;                                // v
-    delta = max - min;
-    if (delta < 0.00001)
-    {
-        out.y = 0;
-        out.x = 0; // undefined, maybe nan?
-        goto bits;
-    }
-    if( max > 0.0 ) { // NOTE: if Max is == 0, this divide would cause a crash
-        out.y = (delta / max);                  // s
-    } else {
-        // if max is 0, then r = g = b = 0              
-        // s = 0, h is undefined
-        out.y = 0.0;
-        out.x = NAN;                            // its now undefined
-        goto bits;
-    }
-    if( r >= max )                           // > is bogus, just keeps compilor happy
-        out.x = ( g - b ) / delta;        // between yellow & magenta
-    else
-    if( g >= max )
-        out.x = 2.0 + ( b - r ) / delta;  // between cyan & yellow
-    else
-        out.x = 4.0 + ( r - g ) / delta;  // between magenta & cyan
-
-    out.x *= 60.0;                              // degrees
-
-    if( out.x < 0.0 )
-        out.x += 360.0;
-
-bits:
     short result = 0;
-    result = ((short)(out.z*31.0f));
+    result = ((short)(val*31.0f));
     result = result << 5;
-    result += ((short)(out.y*31.0f));
+    result += ((short)(sat*31.0f));
     result = result << 5;
-    result += ((short)(out.x*31.0f));
+    result += ((short)(hue*31.0f));
     return result;
+}
+
+std::vector<int> Font::getAscii()
+{
+    std::vector<int> chars;
+    chars.reserve(128);
+    for (int i=97; i<98; i++)
+    {
+        chars.push_back(i);
+    }
+    return chars;
 }

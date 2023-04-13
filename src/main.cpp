@@ -1,10 +1,10 @@
 #define SNES
 
 #ifdef SNES
-    #include "snesGraphicsEditor.cpp" 
+    #include "../demos/snesGraphicsEditor.cpp" 
 #endif
 #ifdef SPECTRUM
-    #include "spectrum.cpp"
+    #include "../demos/spectrum.cpp"
 #endif
 
 int main(int argc, char** argv)
@@ -15,7 +15,7 @@ int main(int argc, char** argv)
             snesGraphicsEditor(argc, argv);
         #endif 
         #ifdef SPECTRUM
-            spectrum();
+            spectrum(argc, argv);
         #endif
     }
     catch (const std::exception& e) 

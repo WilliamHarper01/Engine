@@ -39,6 +39,12 @@ void screenToWorld(double * x, double * y)
     *y = (*y)/((double)width)-(height/(float)width/2.0f);
 }
 
+void getCursorPos(double * x, double * y)
+{
+    glfwGetCursorPos(window, x, y);
+    screenToWorld(x, y);
+}
+
 bool checkInside(double dx, double dy, double sx, double sy, double sw, double sh)
 {
     sw /= 2.0;
@@ -144,13 +150,21 @@ bool renderFrame() {
             r->transform.depth = i->pos.z;
             r->transform.size = glm::vec2(i->scale.x, i->scale.y);
             r->transform.color = {i->color.r, i->color.g, i->color.b, i->color.a};
-            if (mouseLeftPressed == false && mouseLeft == GLFW_PRESS && i->onClick != nullptr
-                && checkInside(cx, cy, i->pos.x, i->pos.y, i->scale.x, i->scale.y)) {
+            
+            if (!checkInside(cx, cy, i->pos.x, i->pos.y, i->scale.x, i->scale.y))
+                continue;
+
+            if (mouseLeftPressed == false && mouseLeft == GLFW_PRESS && i->onClick != nullptr) {
                 i->onClick(i, MOUSE_LEFT);
             }
-            if (mouseRightPressed == false && mouseRight == GLFW_PRESS && i->onClick != nullptr
-                && checkInside(cx, cy, i->pos.x, i->pos.y, i->scale.x, i->scale.y)) {
+            if (mouseRightPressed == false && mouseRight == GLFW_PRESS && i->onClick != nullptr) {
                 i->onClick(i, MOUSE_RIGHT);
+            }
+            if (mouseLeft == GLFW_PRESS && i->onClickDown != nullptr){
+                i->onClickDown(i, MOUSE_LEFT);
+            }
+            if (mouseRight == GLFW_PRESS && i->onClickDown != nullptr){
+                i->onClickDown(i, MOUSE_RIGHT);
             }
         }
     }
@@ -2164,7 +2178,7 @@ void Render::create(Texture& tex)
     isCreated = true;
 }
 
-void Render::create(Font& font, std::basic_string<wchar_t>& unicodeText)
+void Render::create(Font & font, std::string & unicodeText)
 {
     VkRender* r = new VkRender((VkTexture*)font.tex.handle);
     

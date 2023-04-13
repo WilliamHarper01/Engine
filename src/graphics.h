@@ -76,6 +76,7 @@ public:
 
 	~Font();
 	void createFont(std::string filename, std::vector<int> extraChars);
+	static std::vector<int> getAscii();
 };
 
 class Render {
@@ -86,10 +87,11 @@ public:
 	Color color;
 	void* handle;
 	void (*onClick)(Render *, int) = nullptr;
+	void (*onClickDown)(Render *, int) = nullptr;
 	~Render();
 	void create(Mesh& mesh, Texture& tex);
 	void create(Texture& tex);
-	void create(Font& font, std::basic_string<wchar_t>& unicodeText);
+	void create(Font& font, std::string & unicodeText);
 };
 
 extern std::vector<Render*> objects;
@@ -99,6 +101,7 @@ void initVulkan();
 bool renderFrame();
 void cleanVulkan();
 double currTime();
+void getCursorPos(double * x, double * y);
 
 extern V3 cameraPos;
 extern V3 cameraLook;
