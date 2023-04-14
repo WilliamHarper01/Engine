@@ -135,7 +135,7 @@ class VkRender {
 public:
     VkUBO transform;
     VkTexture* tex;
-    VkMesh* mesh;
+    VkMesh* mesh = nullptr;
     std::vector<VkDescriptorSet> descriptorSets;
 
     VkRender(VkTexture* tex);

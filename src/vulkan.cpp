@@ -2178,30 +2178,44 @@ void Render::create(Texture& tex)
     isCreated = true;
 }
 
-void Render::create(Font & font, std::string & unicodeText)
-{
-    VkRender* r = new VkRender((VkTexture*)font.tex.handle);
+void Render::updateText(Font & font, std::string & unicodeText)
+{   
+    VkRender * r = (VkRender*)this->handle;
+
+    if (r->mesh != nullptr)
+        delete r->mesh;
     
     std::vector<Vertex> vertices;
     vertices.resize(unicodeText.size() * 4);
     std::vector<uint32_t> indices;
     indices.resize(unicodeText.size() * 6);
 
-    std::vector<Vertex> vIdentity = {
+    static std::vector<Vertex> vIdentity = {
         {{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f}},
         {{0.5f, -0.5f, 0.0f}, {1.0f, 0.0f}},
         {{0.5f, 0.5f, 0.0f}, {1.0f, 1.0f}},
         {{-0.5f, 0.5f, 0.0f}, {0.0f, 1.0f}}
     };
 
-    std::vector<uint32_t> iIdentity = {
+    static std::vector<uint32_t> iIdentity = {
         0, 1, 2, 2, 3, 0
     };
 
     float stride = 0.0f;
+    float voffset = 0.0f;
 
     for (int i = 0; i < unicodeText.size(); i++)
     {
+        if (unicodeText[i] == 32)
+        {
+            stride += font.spaceLength;
+        }
+        else if (unicodeText[i] == '\n')
+        {
+            stride = 0.0f;
+            voffset += font.lineSpace;
+        }
+        
         FontGlyph g = font.glyphs[(int)unicodeText[i]];
         float w = g.gWidth / (float)font.fontSize;
         float cStride = stride + w;
@@ -2211,10 +2225,10 @@ void Render::create(Font & font, std::string & unicodeText)
         int q = i * vIdentity.size();
 
         vertices[q + 3].pos = glm::vec3(stride,
-            vIdentity[3].pos.y, 
+            vIdentity[3].pos.y + voffset, 
             0.0f);
         vertices[q + 0].pos = glm::vec3(vertices[q + 3].pos.x, vertices[q + 3].pos.y - h, 0.0f);
-        vertices[q + 2].pos = glm::vec3(cStride, vIdentity[2].pos.y, 0.0f);
+        vertices[q + 2].pos = glm::vec3(cStride, vIdentity[2].pos.y + voffset, 0.0f);
         vertices[q + 1].pos = glm::vec3(vertices[q + 2].pos.x, vertices[q + 0].pos.y, 0.0f);
 
         for (int j = 0; j < vIdentity.size(); j++)
@@ -2227,19 +2241,24 @@ void Render::create(Font & font, std::string & unicodeText)
             
         }
 
-
-        
         for (int j = 0; j < iIdentity.size(); j++)
         {
             indices[i * iIdentity.size() + j] = i * vIdentity.size() + iIdentity[j];
         }
 
-        stride = cStride;
+        stride = cStride + font.charSpace;
     }
     
-    
     r->mesh = new VkMesh(vertices, indices);
+}
+
+void Render::create(Font & font, std::string & unicodeText)
+{
+    VkRender* r = new VkRender((VkTexture*)font.tex.handle);
     this->handle = r;
+    
+    updateText(font, unicodeText);
+
     is3d = false;
     scale.x = 1.0;
     scale.y = 1.0;
@@ -2319,6 +2338,9 @@ void Font::createFont(std::string filename, std::vector<int> extraChars)
         stbi_uc* pixels = face->glyph->bitmap.buffer;
         int width = face->glyph->bitmap.width;
         int height = face->glyph->bitmap.rows;
+
+        if (width <= 0 || height <= 0)
+            throw std::runtime_error("a glyph didn't load for some reason\n");
 
         tex[i] = new VkTexture(pixels, width, height, 1);
         renders[i] = new VkRender(tex[i], &unfiltered);

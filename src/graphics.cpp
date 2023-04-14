@@ -81,7 +81,7 @@ std::vector<int> Font::getAscii()
 {
     std::vector<int> chars;
     chars.reserve(128);
-    for (int i=97; i<98; i++)
+    for (int i=33; i<127; i++)
     {
         chars.push_back(i);
     }

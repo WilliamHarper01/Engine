@@ -29,7 +29,8 @@ Render saveButton;
 Render mixer;
 
 short paletteValues[256];
-unsigned char spriteValues[256];
+unsigned char * spriteValues = nullptr;
+unsigned char spriteCount;
 
 short clearShort = 0;
 
@@ -45,6 +46,27 @@ Render hue, sat, val;
 Render hueMarker, satMarker, valMarker, paletteMarker;
 
 unsigned char bpp = 4;
+
+Font f;
+
+void setSpriteCount(unsigned char count)
+{
+    if (spriteValues == nullptr)
+    {
+        printf("we get here %d\n", count*256);
+        spriteValues = (unsigned char*)malloc(count*256);
+        memset(spriteValues, 0, count*256);
+    }
+    else
+    {
+        unsigned char * temp = (unsigned char*)malloc(count*256);
+        memset(temp, 0, count*256);
+        memcpy(temp, spriteValues, spriteCount*256);
+        free(spriteValues);
+        spriteValues = temp;
+    }
+    spriteCount = count;
+}
 
 void onClickPalette(Render * clicked, int button)
 {
@@ -74,6 +96,7 @@ void onClickSave(Render * clicked, int button)
     fclose(file);
 
     file = fopen(spriteFile, "wb");
+    fwrite(&spriteCount, 1, 1, file);
     fwrite(&bpp, 1, 1, file);
     fwrite(spriteValues, 1, 256, file);
     fclose(file);
@@ -152,7 +175,7 @@ void setBackgroundColor()
 void loadFiles()
 {
     memset(paletteValues, 0, 512);
-    memset(spriteValues, 0, 256);
+    spriteCount = 1;
     
     FILE * file = fopen(paletteFile, "rb");
     if (file)
@@ -164,10 +187,15 @@ void loadFiles()
     file = fopen(spriteFile, "rb");
     if (file)
     {
+        fread(&spriteCount, 1, 1, file);
+        setSpriteCount(spriteCount);
         fread(&bpp, 1, 1, file);
-        fread(spriteValues, 256, 1, file);
+        for (int i=0; i<spriteCount; i++)
+            fread(spriteValues, 256, 1, file);
         fclose(file);
     }
+    else
+        setSpriteCount(spriteCount);
 
 
     return;
@@ -190,6 +218,12 @@ void snesGraphicsEditor(int argc, char** argv)
     createWindow();
         
     initVulkan();
+
+    f.fontSize = 72;
+    f.createFont("Roboto-Regular.ttf", Font::getAscii());
+    f.spaceLength = 0.33f;
+    f.charSpace = 0.1f;
+    f.lineSpace = 0.8f;
 
     Texture t;
     t.create("E:/VisualStudio/Engine/white.png");
@@ -277,8 +311,16 @@ void snesGraphicsEditor(int argc, char** argv)
     paletteMarker.scale = valMarker.scale;
     paletteMarker.pos = palette[selectedColor].pos;
 
+    Render text;
+    std::string rstr = "hello, world!";
+    text.create(f, rstr);
+    text.scale = {0.05f, 0.05f, 1.0f};
+
     do
     {
+        std::string rstr = "woa\nwe have newlines!";
+        text.updateText(f, rstr);
+        
         setBackgroundColor();
         setRenderColors();
     } while(renderFrame());

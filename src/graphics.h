@@ -70,7 +70,10 @@ struct FontGlyph {
 class Font {
 public:
 	Texture tex;
-	int fontSize;
+	int fontSize = 12;
+	float spaceLength = 1.0f;
+	float charSpace = 0.2f;
+	float lineSpace = 1.0f;
 	int wGlyphs;
 	std::unordered_map<int, FontGlyph> glyphs;
 
@@ -92,6 +95,7 @@ public:
 	void create(Mesh& mesh, Texture& tex);
 	void create(Texture& tex);
 	void create(Font& font, std::string & unicodeText);
+	void updateText(Font& font, std::string & text);
 };
 
 extern std::vector<Render*> objects;
