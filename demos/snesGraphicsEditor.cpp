@@ -30,7 +30,11 @@ Render mixer;
 
 short paletteValues[256];
 unsigned char * spriteValues = nullptr;
+
 unsigned char spriteCount;
+unsigned char currSprite = 0;
+Render appendButton;
+#define MAX_SPRITES 16
 
 short clearShort = 0;
 
@@ -72,9 +76,9 @@ void onClickPalette(Render * clicked, int button)
 {
     for(int i=0; i<256; i++)
         if (clicked->handle == palette[i].handle)
-            if (button == 1)
+            if (button == MOUSE_LEFT)
                 selectedColor = i;
-            else if (button == 2)
+            else if (button == MOUSE_RIGHT)
                 paletteValues[i] = mixerColor;
     paletteMarker.pos = palette[selectedColor].pos;
 }
@@ -83,10 +87,10 @@ void onClickSprite(Render * clicked, int button)
 {
     for(int i=0; i<256; i++)
         if (clicked->handle == sprite[i].handle)
-            if (button == 1)
-                spriteValues[i] = selectedColor;
-            else if (button == 2)
-                spriteValues[i] = 0;
+            if (button == MOUSE_LEFT)
+                spriteValues[i+256*currSprite] = selectedColor;
+            else if (button == MOUSE_RIGHT)
+                spriteValues[i+256*currSprite] = 0;
 }
 
 void onClickSave(Render * clicked, int button)
@@ -98,8 +102,14 @@ void onClickSave(Render * clicked, int button)
     file = fopen(spriteFile, "wb");
     fwrite(&spriteCount, 1, 1, file);
     fwrite(&bpp, 1, 1, file);
-    fwrite(spriteValues, 1, 256, file);
+    fwrite(spriteValues, 256, spriteCount, file);
     fclose(file);
+}
+
+void onClickAppend(Render * clicked, int button)
+{
+    if (spriteCount < MAX_SPRITES)
+        setSpriteCount(spriteCount + 1);
 }
 
 char posToColorVal(Render * clicked)
@@ -146,8 +156,8 @@ void setRenderColors()
         
         int p = (1 << bpp);
 
-        if (spriteValues[i] % p != 0)
-            sprite[i].color.from5Bit(paletteValues[(spriteValues[i] % p) + (p * (selectedColor/p))]);
+        if (spriteValues[i+256*currSprite] % p != 0)
+            sprite[i].color.from5Bit(paletteValues[(spriteValues[i+256*currSprite] % p) + (p * (selectedColor/p))]);
         else
             sprite[i].color = {1.0f, 1.0f, 1.0f, 0.05f};
         
@@ -190,8 +200,7 @@ void loadFiles()
         fread(&spriteCount, 1, 1, file);
         setSpriteCount(spriteCount);
         fread(&bpp, 1, 1, file);
-        for (int i=0; i<spriteCount; i++)
-            fread(spriteValues, 256, 1, file);
+        fread(spriteValues, 256, spriteCount, file);
         fclose(file);
     }
     else
@@ -199,6 +208,20 @@ void loadFiles()
 
 
     return;
+}
+
+void switchSprites()
+{
+    static bool isAlreadyDown = false;
+    
+    if (getKeyDown('a') && !isAlreadyDown) { currSprite--; isAlreadyDown = true;}
+    else if (getKeyDown('d') && !isAlreadyDown) {currSprite++; isAlreadyDown = true;}
+    else if (!getKeyDown('a') && !getKeyDown('d')) {isAlreadyDown = false;}
+
+    currSprite = currSprite % spriteCount;
+
+    if (currSprite < 0)
+        currSprite = spriteCount - 1;
 }
 
 void snesGraphicsEditor(int argc, char** argv)
@@ -217,7 +240,7 @@ void snesGraphicsEditor(int argc, char** argv)
     
     createWindow();
         
-    initVulkan();
+    initGraphics();
 
     f.fontSize = 72;
     f.createFont("Roboto-Regular.ttf", Font::getAscii());
@@ -226,7 +249,7 @@ void snesGraphicsEditor(int argc, char** argv)
     f.lineSpace = 0.8f;
 
     Texture t;
-    t.create("E:/VisualStudio/Engine/white.png");
+    t.create("default");
 
     //Render r;
     //r.create(t);
@@ -247,6 +270,19 @@ void snesGraphicsEditor(int argc, char** argv)
         palette[i].onClick = onClickPalette;
     }
 
+    Render ref;
+    Texture refImage;
+
+    if (argc > 3)
+    {
+        refImage.create(std::string(argv[3]));
+        
+        ref.create(refImage);
+        ref.scale = {SPRITE_PIXEL_SIZE*16, SPRITE_PIXEL_SIZE*16, 1.0f};
+        ref.pos.x = 7.5f * SPRITE_PIXEL_SIZE + SPRITE_OFFSET_X;
+        ref.pos.y = 7.5f * SPRITE_PIXEL_SIZE + SPRITE_OFFSET_Y;
+    }
+
     for (int i=0; i<256; i++)
     {
         sprite[i].create(t);
@@ -256,14 +292,19 @@ void snesGraphicsEditor(int argc, char** argv)
         sprite[i].onClickDown = onClickSprite;
     }
 
-    Texture save;
-    save.create("E:/VisualStudio/Engine/save.png");
-
-    saveButton.create(save);
+    saveButton.create(t);
     saveButton.scale = {BUTTON_SIZE, BUTTON_SIZE, 1.0f};
     saveButton.pos.x = -0.35f;
     saveButton.pos.y = 0.25f;
     saveButton.onClick = onClickSave;
+
+    Render saveText;
+    Goodstr saveStr;
+    saveStr.format("save");
+    saveText.create(f, saveStr);
+    saveText.scale = {0.01f, 0.01f, 1.0f};
+    saveText.pos = saveButton.pos;
+    saveText.color = BLACK;
 
     mixer.create(t);
     mixer.scale = saveButton.scale;
@@ -312,17 +353,40 @@ void snesGraphicsEditor(int argc, char** argv)
     paletteMarker.pos = palette[selectedColor].pos;
 
     Render text;
-    std::string rstr = "hello, world!";
-    text.create(f, rstr);
-    text.scale = {0.05f, 0.05f, 1.0f};
+    Goodstr scstr;
+
+    scstr.format("Sprite: %d/%d", currSprite, spriteCount);
+
+    text.create(f, scstr);
+    text.scale = {0.02f, 0.02f, 1.0f};
+    text.pos = saveButton.pos;
+    text.pos.x += 0.2f;
+    text.color = {0.0f, 0.0f, 0.0f, 1.0f};
+
+    appendButton.create(t);
+    appendButton.scale = {BUTTON_SIZE, BUTTON_SIZE, 1.0f};
+    appendButton.pos.x = -0.25f;
+    appendButton.pos.y = 0.25f;
+    appendButton.onClick = onClickAppend;
+
+    Render appendText;
+    Goodstr appendStr;
+    appendStr.format("append");
+    appendText.create(f, appendStr);
+    appendText.scale = {0.01f, 0.01f, 1.0f};
+    appendText.pos = appendButton.pos;
+    appendText.color = BLACK;
 
     do
     {
-        std::string rstr = "woa\nwe have newlines!";
-        text.updateText(f, rstr);
+        switchSprites();
+        
+        scstr.format("Sprite: %d/%d", currSprite+1, spriteCount);
+
+        text.updateText(f, scstr);
         
         setBackgroundColor();
         setRenderColors();
     } while(renderFrame());
-    cleanVulkan();
+    cleanGraphics();
 }

@@ -13,17 +13,13 @@
 #include <set>
 #include <unordered_map>
 
+#include "goodstr.h"
+
 #define MOUSE_LEFT 1
 #define MOUSE_RIGHT 2
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-
-const int MAX_FRAMES_IN_FLIGHT = 2;
-
-const std::string shaders = "shaders/";
-
-const bool enableValidationLayers = true;
 
 struct V3 {
 	float x, y, z;
@@ -42,6 +38,9 @@ struct Color{
 	short to5BitHSV(); //in format 0b0vvvvvssssshhhhh
 	void print();
 };
+
+#define BLACK {0.0f, 0.0f, 0.0f, 1.0f}
+#define WHITE {1.0f, 1.0f, 1.0f, 1.0f}
 
 extern Color clearColor;
 
@@ -74,6 +73,7 @@ public:
 	float spaceLength = 1.0f;
 	float charSpace = 0.2f;
 	float lineSpace = 1.0f;
+	bool centerText = true;
 	int wGlyphs;
 	std::unordered_map<int, FontGlyph> glyphs;
 
@@ -94,18 +94,19 @@ public:
 	~Render();
 	void create(Mesh& mesh, Texture& tex);
 	void create(Texture& tex);
-	void create(Font& font, std::string & unicodeText);
-	void updateText(Font& font, std::string & text);
+	void create(Font& font, Goodstr & unicodeText);
+	void updateText(Font& font, Goodstr & text);
 };
 
 extern std::vector<Render*> objects;
 
 void createWindow();
-void initVulkan();
+void initGraphics();
 bool renderFrame();
-void cleanVulkan();
+void cleanGraphics();
 double currTime();
 void getCursorPos(double * x, double * y);
+bool getKeyDown(char key);
 
 extern V3 cameraPos;
 extern V3 cameraLook;

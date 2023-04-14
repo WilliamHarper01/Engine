@@ -22,6 +22,12 @@
 
 #include <config.h>
 
+const int MAX_FRAMES_IN_FLIGHT = 2;
+
+const std::string shaders = "shaders/";
+
+const bool enableValidationLayers = true;
+
 const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
 };

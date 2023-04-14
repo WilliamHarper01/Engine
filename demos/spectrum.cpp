@@ -86,7 +86,7 @@ int spectrum(int argc, char** argv)
 	
 	createWindow();
 	
-	initVulkan();
+	initGraphics();
 
 	Texture t;
 	t.create("white.png");
@@ -128,6 +128,6 @@ int spectrum(int argc, char** argv)
 		
 	}
 
-	cleanVulkan();
+	cleanGraphics();
 }
 

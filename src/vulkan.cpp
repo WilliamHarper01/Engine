@@ -68,7 +68,7 @@ bool checkInside(double dx, double dy, double sx, double sy, double sw, double s
     return true;
 }
 
-void initVulkan() {
+void initGraphics() {
     
     renders.reserve(1024);
     render3ds.reserve(1024);
@@ -219,7 +219,7 @@ void cleanupSwapChain() {
     
 }
 
-void cleanVulkan() {
+void cleanGraphics() {
     cleanupSwapChain();
 
     vkDestroySampler(device, textureSampler, nullptr);
@@ -1872,23 +1872,28 @@ void VkRender3d::createDescriptorSets()
     }
 }
 
+stbi_uc defaultPixels[] = {255, 255, 255, 255,
+                            255, 255, 255, 255,
+                            255, 255, 255, 255,
+                            255, 255, 255, 255};
+
 VkTexture::VkTexture(std::string filename)
 {
     int texWidth, texHeight, texChannels;
     stbi_uc* pixels = stbi_load(filename.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 
     if (!pixels) {
-        std::string altFilename = ROOTPATH + filename;
-
-        stbi_load(altFilename.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-        throw std::runtime_error("failed to load texture image!");
+        pixels = defaultPixels;
+        texWidth = 2;
+        texHeight = 2;
     }
 
     loadImage(pixels, texWidth, texHeight, 4);
     createTextureImageView(VK_FORMAT_R8G8B8A8_SRGB);
     textures.push_back(this);
 
-    stbi_image_free(pixels);
+    if (pixels != defaultPixels)
+        stbi_image_free(pixels);
 }
 
 VkTexture::VkTexture(unsigned char* pixels, int width, int height, int channels)
@@ -2178,7 +2183,7 @@ void Render::create(Texture& tex)
     isCreated = true;
 }
 
-void Render::updateText(Font & font, std::string & unicodeText)
+void Render::updateText(Font & font, Goodstr & unicodeText)
 {   
     VkRender * r = (VkRender*)this->handle;
 
@@ -2186,9 +2191,9 @@ void Render::updateText(Font & font, std::string & unicodeText)
         delete r->mesh;
     
     std::vector<Vertex> vertices;
-    vertices.resize(unicodeText.size() * 4);
+    vertices.resize(unicodeText.length() * 4);
     std::vector<uint32_t> indices;
-    indices.resize(unicodeText.size() * 6);
+    indices.resize(unicodeText.length() * 6);
 
     static std::vector<Vertex> vIdentity = {
         {{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f}},
@@ -2204,19 +2209,20 @@ void Render::updateText(Font & font, std::string & unicodeText)
     float stride = 0.0f;
     float voffset = 0.0f;
 
-    for (int i = 0; i < unicodeText.size(); i++)
+    int i=0;
+    while(unicodeText.cstr()[i] != 0)
     {
-        if (unicodeText[i] == 32)
+        if (unicodeText.cstr()[i] == 32)
         {
             stride += font.spaceLength;
         }
-        else if (unicodeText[i] == '\n')
+        else if (unicodeText.cstr()[i] == '\n')
         {
             stride = 0.0f;
             voffset += font.lineSpace;
         }
         
-        FontGlyph g = font.glyphs[(int)unicodeText[i]];
+        FontGlyph g = font.glyphs[(int)unicodeText.cstr()[i]];
         float w = g.gWidth / (float)font.fontSize;
         float cStride = stride + w;
 
@@ -2247,12 +2253,22 @@ void Render::updateText(Font & font, std::string & unicodeText)
         }
 
         stride = cStride + font.charSpace;
+
+        i++;
+    }
+
+    if (font.centerText)
+    {
+        for (int v=0; v<vertices.size(); v++)
+        {
+            vertices[v].pos.x -= stride*0.5f;
+        }
     }
     
     r->mesh = new VkMesh(vertices, indices);
 }
 
-void Render::create(Font & font, std::string & unicodeText)
+void Render::create(Font & font, Goodstr & unicodeText)
 {
     VkRender* r = new VkRender((VkTexture*)font.tex.handle);
     this->handle = r;
@@ -2412,4 +2428,11 @@ void Font::createFont(std::string filename, std::vector<int> extraChars)
         delete tex[i];
     }
 
+}
+
+bool getKeyDown(char key)
+{
+    if (key >= 97 && key <= 122)
+        key -= 32;
+    return glfwGetKey(window, (int)key) == GLFW_PRESS;
 }
