@@ -15,7 +15,7 @@
 
 #include "goodstr.h"
 
-#define MOUSE_LEFT 1
+#define MOUSE_LEFT 0
 #define MOUSE_RIGHT 2
 
 const uint32_t WIDTH = 1920;
@@ -102,7 +102,7 @@ extern std::vector<Render*> objects;
 
 void createWindow();
 void initGraphics();
-bool renderFrame();
+bool startLoop(void (*updateCallback)());
 void cleanGraphics();
 double currTime();
 void getCursorPos(double * x, double * y);

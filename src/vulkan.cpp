@@ -7,16 +7,6 @@ std::vector<Render*> objects = {};
 V3 cameraPos(-1.0f, 0.0f, 0.70f);
 V3 cameraLook(1.0f, 0.0f, 0.0f);
 
-void V3::print()
-{
-    printf("%3.3f, %3.3f, %3.3f\n", x, y, z);
-}
-
-void Color::print()
-{
-    printf("%3.3f, %3.3f, %3.3f, %3.3f\n", r, g, b, a);
-}
-
 void createWindow() {
     glfwInit();
 
@@ -189,6 +179,17 @@ bool renderFrame() {
         vkDeviceWaitIdle(device);
         return false;
     }
+}
+
+bool startLoop(void (*updateCallback)())
+{
+    do
+    {
+        updateCallback();
+    } while(renderFrame());
+
+    cleanGraphics();
+    return false;
 }
 
 void cleanupSwapChain() {

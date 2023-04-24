@@ -1,5 +1,10 @@
-#include "graphics.h"
-#include "audio.h"
+#if __clang__
+	#include "../src/graphics.h"
+	#include "../src/audio.h"
+#else
+	#include "graphics.h"
+	#include "audio.h"
+#endif
 
 #include <complex>
 #include <valarray>
@@ -71,6 +76,31 @@ Complex sub[WAVELENGTH_SUB];
 int s;
 Render r[BARS];
 
+void update()
+{
+	double cTime = currTime() - timeStart;
+	s = (int)(44100.0 * cTime);
+
+	if (wav.data.size() / 2 > WAVELENGTH_SUB + s) {
+		
+		for (int i = 0; i < WAVELENGTH_SUB; i++)
+		{
+			sub[i] = wav.data[(i + s) * 2] / 32767.0f;
+		}
+		
+		CArray data(sub, WAVELENGTH_SUB);
+		fftMag(data);
+
+		for (int i = 0; i < BARS; i++)
+		{
+			float ampl = data[i+1].real();
+			//ampl = 20 * log10(ampl);
+			r[i].pos.y = 0.75f - (float)(ampl * 0.0005f);
+		}
+
+	}
+}
+
 int spectrum(int argc, char** argv) 
 {
 	if (argc <= 1){
@@ -102,32 +132,6 @@ int spectrum(int argc, char** argv)
 	a.play();
 	double timeStart = currTime();
 
-	while (renderFrame())
-	{
-		double cTime = currTime() - timeStart;
-		s = (int)(44100.0 * cTime);
-
-		if (wav.data.size() / 2 > WAVELENGTH_SUB + s) {
-			
-			for (int i = 0; i < WAVELENGTH_SUB; i++)
-			{
-				sub[i] = wav.data[(i + s) * 2] / 32767.0f;
-			}
-			
-			CArray data(sub, WAVELENGTH_SUB);
-			fftMag(data);
-
-			for (int i = 0; i < BARS; i++)
-			{
-				float ampl = data[i+1].real();
-				//ampl = 20 * log10(ampl);
-				r[i].pos.y = 0.75f - (float)(ampl * 0.0005f);
-			}
-
-		}
-		
-	}
-
-	cleanGraphics();
+	startLoop(update);
 }
 

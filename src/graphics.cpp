@@ -87,3 +87,13 @@ std::vector<int> Font::getAscii()
     }
     return chars;
 }
+
+void Color::print()
+{
+    printf("%3.3f, %3.3f, %3.3f, %3.3f\n", r, g, b, a);
+}
+
+void V3::print()
+{
+    printf("%3.3f, %3.3f, %3.3f\n", x, y, z);
+}

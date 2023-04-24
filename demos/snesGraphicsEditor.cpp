@@ -1,5 +1,11 @@
-#include "graphics.h"
-#include "audio.h"
+#if __clang__
+	#include "../src/graphics.h"
+	#include "../src/audio.h"
+#else
+	#include "graphics.h"
+	#include "audio.h"
+#endif
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,11 +59,14 @@ unsigned char bpp = 4;
 
 Font f;
 
+Goodstr scstr;
+
+Render text;
+
 void setSpriteCount(unsigned char count)
 {
     if (spriteValues == nullptr)
     {
-        printf("we get here %d\n", count*256);
         spriteValues = (unsigned char*)malloc(count*256);
         memset(spriteValues, 0, count*256);
     }
@@ -224,6 +233,18 @@ void switchSprites()
         currSprite = spriteCount - 1;
 }
 
+void update()
+{
+    switchSprites();
+    
+    scstr.format("Sprite: %d/%d", currSprite+1, spriteCount);
+
+    text.updateText(f, scstr);
+    
+    setBackgroundColor();
+    setRenderColors();
+}
+
 void snesGraphicsEditor(int argc, char** argv)
 {   
     spriteFile = "sprite.spr";
@@ -235,8 +256,6 @@ void snesGraphicsEditor(int argc, char** argv)
         paletteFile = argv[2];
 
     loadFiles();
-
-    srand(time(NULL));
     
     createWindow();
         
@@ -348,13 +367,6 @@ void snesGraphicsEditor(int argc, char** argv)
     valMarker.scale = {MARKER_SIZE, MARKER_SIZE, 1.0f};
     valMarker.pos = val.pos;
 
-    paletteMarker.create(t);
-    paletteMarker.scale = valMarker.scale;
-    paletteMarker.pos = palette[selectedColor].pos;
-
-    Render text;
-    Goodstr scstr;
-
     scstr.format("Sprite: %d/%d", currSprite, spriteCount);
 
     text.create(f, scstr);
@@ -377,16 +389,9 @@ void snesGraphicsEditor(int argc, char** argv)
     appendText.pos = appendButton.pos;
     appendText.color = BLACK;
 
-    do
-    {
-        switchSprites();
-        
-        scstr.format("Sprite: %d/%d", currSprite+1, spriteCount);
+    paletteMarker.create(t);
+    paletteMarker.scale = valMarker.scale;
+    paletteMarker.pos = palette[selectedColor].pos;
 
-        text.updateText(f, scstr);
-        
-        setBackgroundColor();
-        setRenderColors();
-    } while(renderFrame());
-    cleanGraphics();
+    startLoop(update);
 }
