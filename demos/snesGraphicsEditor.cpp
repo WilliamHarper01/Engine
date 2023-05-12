@@ -247,11 +247,11 @@ void update()
 
 void snesGraphicsEditor(int argc, char** argv)
 {   
-    spriteFile = "sprite.spr";
+    spriteFile = "assets/sprite.spr";
     if (argc > 1)
         spriteFile = argv[1];
 
-    paletteFile = "palette.pal";
+    paletteFile = "assets/palette.pal";
     if (argc > 2)
         paletteFile = argv[2];
 
@@ -333,22 +333,22 @@ void snesGraphicsEditor(int argc, char** argv)
     hue.create(t);
     hue.scale.x = mixer.scale.x*4.0f;
     hue.scale.y = mixer.scale.y*0.5f;
-    hue.pos.x = mixer.pos.x;
-    hue.pos.y = mixer.pos.y + 0.06f;
+    hue.pos.x = 0.35f;
+    hue.pos.y = 0.11f;
     hue.onClickDown = onClickHue;
 
     sat.create(t);
     sat.scale.x = mixer.scale.x*4.0f;
     sat.scale.y = mixer.scale.y*0.5f;
-    sat.pos.x = mixer.pos.x;
-    sat.pos.y = mixer.pos.y + 0.1f;
+    sat.pos.x = 0.35f;
+    sat.pos.y = 0.15f;
     sat.onClickDown = onClickSat;
 
     val.create(t);
     val.scale.x = mixer.scale.x*4.0f;
     val.scale.y = mixer.scale.y*0.5f;
-    val.pos.x = mixer.pos.x;
-    val.pos.y = mixer.pos.y + 0.14f;
+    val.pos.x = 0.35f;
+    val.pos.y = 0.19f;
     val.onClickDown = onClickVal;
 
     h = 0b10000;

@@ -1,8 +1,13 @@
 #include "audio.h"
-
 #include "stb_vorbis.c"
+
+#ifdef WEBAL
+#include <AL/al.h>
+#include <AL/alc.h>
+#else
 #include <al.h>
 #include <alc.h>
+#endif
 
 ALCdevice* aDevice;
 ALCcontext* Context;
@@ -133,8 +138,6 @@ void AudioSource::destroySource()
 	const ALuint sources[1] = { source };
 	alDeleteSources(1, sources);
 }
-
-
 
 WAV::~WAV()
 {

@@ -23,6 +23,8 @@ add_executable(Engine
 	src/main.cpp
 )
 
+target_compile_definitions(Engine PRIVATE CUBESPIN)
+
 #add config
 target_include_directories(Engine PUBLIC "${PROJECT_BINARY_DIR}")
 

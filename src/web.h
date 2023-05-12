@@ -58,3 +58,13 @@ public:
     WebRender();
     ~WebRender();
 };
+
+class WebTexture
+{
+    GLint buffer;
+}
+
+class WebMesh
+{
+    
+}

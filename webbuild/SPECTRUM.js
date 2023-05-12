@@ -21,7 +21,196 @@ var Module = typeof Module != 'undefined' ? Module : {};
 
 // --pre-jses are emitted after the Module integration code, so that they can
 // refer to Module (if they choose; they can also define Module)
-// {{PRE_JSES}}
+
+  if (!Module.expectedDataFileDownloads) {
+    Module.expectedDataFileDownloads = 0;
+  }
+
+  Module.expectedDataFileDownloads++;
+  (function() {
+    // When running as a pthread, FS operations are proxied to the main thread, so we don't need to
+    // fetch the .data bundle on the worker
+    if (Module['ENVIRONMENT_IS_PTHREAD']) return;
+    var loadPackage = function(metadata) {
+
+      var PACKAGE_PATH = '';
+      if (typeof window === 'object') {
+        PACKAGE_PATH = window['encodeURIComponent'](window.location.pathname.toString().substring(0, window.location.pathname.toString().lastIndexOf('/')) + '/');
+      } else if (typeof process === 'undefined' && typeof location !== 'undefined') {
+        // web worker
+        PACKAGE_PATH = encodeURIComponent(location.pathname.toString().substring(0, location.pathname.toString().lastIndexOf('/')) + '/');
+      }
+      var PACKAGE_NAME = 'SPECTRUM.data';
+      var REMOTE_PACKAGE_BASE = 'SPECTRUM.data';
+      if (typeof Module['locateFilePackage'] === 'function' && !Module['locateFile']) {
+        Module['locateFile'] = Module['locateFilePackage'];
+        err('warning: you defined Module.locateFilePackage, that has been renamed to Module.locateFile (using your locateFilePackage for now)');
+      }
+      var REMOTE_PACKAGE_NAME = Module['locateFile'] ? Module['locateFile'](REMOTE_PACKAGE_BASE, '') : REMOTE_PACKAGE_BASE;
+var REMOTE_PACKAGE_SIZE = metadata['remote_package_size'];
+
+      function fetchRemotePackage(packageName, packageSize, callback, errback) {
+        if (typeof process === 'object' && typeof process.versions === 'object' && typeof process.versions.node === 'string') {
+          require('fs').readFile(packageName, function(err, contents) {
+            if (err) {
+              errback(err);
+            } else {
+              callback(contents.buffer);
+            }
+          });
+          return;
+        }
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', packageName, true);
+        xhr.responseType = 'arraybuffer';
+        xhr.onprogress = function(event) {
+          var url = packageName;
+          var size = packageSize;
+          if (event.total) size = event.total;
+          if (event.loaded) {
+            if (!xhr.addedTotal) {
+              xhr.addedTotal = true;
+              if (!Module.dataFileDownloads) Module.dataFileDownloads = {};
+              Module.dataFileDownloads[url] = {
+                loaded: event.loaded,
+                total: size
+              };
+            } else {
+              Module.dataFileDownloads[url].loaded = event.loaded;
+            }
+            var total = 0;
+            var loaded = 0;
+            var num = 0;
+            for (var download in Module.dataFileDownloads) {
+            var data = Module.dataFileDownloads[download];
+              total += data.total;
+              loaded += data.loaded;
+              num++;
+            }
+            total = Math.ceil(total * Module.expectedDataFileDownloads/num);
+            if (Module['setStatus']) Module['setStatus']('Downloading data... (' + loaded + '/' + total + ')');
+          } else if (!Module.dataFileDownloads) {
+            if (Module['setStatus']) Module['setStatus']('Downloading data...');
+          }
+        };
+        xhr.onerror = function(event) {
+          throw new Error("NetworkError for: " + packageName);
+        }
+        xhr.onload = function(event) {
+          if (xhr.status == 200 || xhr.status == 304 || xhr.status == 206 || (xhr.status == 0 && xhr.response)) { // file URLs can return 0
+            var packageData = xhr.response;
+            callback(packageData);
+          } else {
+            throw new Error(xhr.statusText + " : " + xhr.responseURL);
+          }
+        };
+        xhr.send(null);
+      };
+
+      function handleError(error) {
+        console.error('package error:', error);
+      };
+
+      var fetchedCallback = null;
+      var fetched = Module['getPreloadedPackage'] ? Module['getPreloadedPackage'](REMOTE_PACKAGE_NAME, REMOTE_PACKAGE_SIZE) : null;
+
+      if (!fetched) fetchRemotePackage(REMOTE_PACKAGE_NAME, REMOTE_PACKAGE_SIZE, function(data) {
+        if (fetchedCallback) {
+          fetchedCallback(data);
+          fetchedCallback = null;
+        } else {
+          fetched = data;
+        }
+      }, handleError);
+
+    function runWithFS() {
+
+      function assert(check, msg) {
+        if (!check) throw msg + new Error().stack;
+      }
+Module['FS_createPath']("/", "assets", true, true);
+
+      /** @constructor */
+      function DataRequest(start, end, audio) {
+        this.start = start;
+        this.end = end;
+        this.audio = audio;
+      }
+      DataRequest.prototype = {
+        requests: {},
+        open: function(mode, name) {
+          this.name = name;
+          this.requests[name] = this;
+          Module['addRunDependency']('fp ' + this.name);
+        },
+        send: function() {},
+        onload: function() {
+          var byteArray = this.byteArray.subarray(this.start, this.end);
+          this.finish(byteArray);
+        },
+        finish: function(byteArray) {
+          var that = this;
+          // canOwn this data in the filesystem, it is a slide into the heap that will never change
+          Module['FS_createDataFile'](this.name, null, byteArray, true, true, true);
+          Module['removeRunDependency']('fp ' + that.name);
+          this.requests[this.name] = null;
+        }
+      };
+
+      var files = metadata['files'];
+      for (var i = 0; i < files.length; ++i) {
+        new DataRequest(files[i]['start'], files[i]['end'], files[i]['audio'] || 0).open('GET', files[i]['filename']);
+      }
+
+      function processPackageData(arrayBuffer) {
+        assert(arrayBuffer, 'Loading data file failed.');
+        assert(arrayBuffer instanceof ArrayBuffer, 'bad input to processPackageData');
+        var byteArray = new Uint8Array(arrayBuffer);
+        var curr;
+        // Reuse the bytearray from the XHR as the source for file reads.
+          DataRequest.prototype.byteArray = byteArray;
+          var files = metadata['files'];
+          for (var i = 0; i < files.length; ++i) {
+            DataRequest.prototype.requests[files[i].filename].onload();
+          }          Module['removeRunDependency']('datafile_SPECTRUM.data');
+
+      };
+      Module['addRunDependency']('datafile_SPECTRUM.data');
+
+      if (!Module.preloadResults) Module.preloadResults = {};
+
+      Module.preloadResults[PACKAGE_NAME] = {fromCache: false};
+      if (fetched) {
+        processPackageData(fetched);
+        fetched = null;
+      } else {
+        fetchedCallback = processPackageData;
+      }
+
+    }
+    if (Module['calledRun']) {
+      runWithFS();
+    } else {
+      if (!Module['preRun']) Module['preRun'] = [];
+      Module["preRun"].push(runWithFS); // FS is not initialized yet, wait for it
+    }
+
+    }
+    loadPackage({"files": [{"filename": "/assets/cube.obj", "start": 0, "end": 1127}, {"filename": "/assets/palette.pal", "start": 1127, "end": 1639}, {"filename": "/assets/sprite.spr", "start": 1639, "end": 3177}, {"filename": "/assets/tex.jpg", "start": 3177, "end": 11509}], "remote_package_size": 11509});
+
+  })();
+
+
+    // All the pre-js content up to here must remain later on, we need to run
+    // it.
+    if (Module['ENVIRONMENT_IS_PTHREAD']) Module['preRun'] = [];
+    var necessaryPreJSTasks = Module['preRun'].slice();
+  
+    if (!Module['preRun']) throw 'Module.preRun should exist because file support used it; did a pre-js delete it?';
+    necessaryPreJSTasks.forEach(function(task) {
+      if (Module['preRun'].indexOf(task) < 0) throw 'All preRun tasks that exist before user pre-js code should remain after; did you replace Module or modify Module.preRun?';
+    });
+  
 
 // Sometimes an existing Module object exists with properties
 // meant to overwrite the default module functionality. Here
@@ -721,10 +910,6 @@ function cwrap(ident, returnType, argTypes, opts) {
 
 // We used to include malloc/free by default in the past. Show a helpful error in
 // builds with assertions.
-function _free() {
-  // Show a helpful error since we used to include free by default in the past.
-  abort("free() called but not included in the build - add '_free' to EXPORTED_FUNCTIONS");
-}
 
 // include: runtime_legacy.js
 
@@ -1496,7 +1681,7 @@ function createExportWrapper(name, fixedasm) {
 }
 
 var wasmBinaryFile;
-  wasmBinaryFile = 'app_wasm.wasm';
+  wasmBinaryFile = 'SPECTRUM.wasm';
   if (!isDataURI(wasmBinaryFile)) {
     wasmBinaryFile = locateFile(wasmBinaryFile);
   }
@@ -1811,11 +1996,36 @@ var ASM_CONSTS = {
       return demangleAll(js);
     }
 
+  function ___assert_fail(condition, filename, line, func) {
+      abort('Assertion failed: ' + UTF8ToString(condition) + ', at: ' + [filename ? UTF8ToString(filename) : 'unknown filename', line, func ? UTF8ToString(func) : 'unknown function']);
+    }
+
   function ___cxa_allocate_exception(size) {
       // Thrown object is prepended by exception metadata block
       return _malloc(size + 24) + 24;
     }
 
+  var exceptionCaught =  [];
+  
+  function exception_addRef(info) {
+      info.add_ref();
+    }
+  
+  var uncaughtExceptionCount = 0;
+  function ___cxa_begin_catch(ptr) {
+      var info = new ExceptionInfo(ptr);
+      if (!info.get_caught()) {
+        info.set_caught(true);
+        uncaughtExceptionCount--;
+      }
+      info.set_rethrown(false);
+      exceptionCaught.push(info);
+      exception_addRef(info);
+      return info.get_exception_ptr();
+    }
+
+  var exceptionLast = 0;
+  
   /** @constructor */
   function ExceptionInfo(excPtr) {
       this.excPtr = excPtr;
@@ -1906,18 +2116,148 @@ var ASM_CONSTS = {
         return this.excPtr;
       };
     }
+  function ___cxa_free_exception(ptr) {
+      try {
+        return _free(new ExceptionInfo(ptr).ptr);
+      } catch(e) {
+        err('exception during __cxa_free_exception: ' + e);
+      }
+    }
+  function exception_decRef(info) {
+      // A rethrown exception can reach refcount 0; it must not be discarded
+      // Its next handler will clear the rethrown flag and addRef it, prior to
+      // final decRef and destruction here
+      if (info.release_ref() && !info.get_rethrown()) {
+        var destructor = info.get_destructor();
+        if (destructor) {
+          // In Wasm, destructors return 'this' as in ARM
+          getWasmTableEntry(destructor)(info.excPtr);
+        }
+        ___cxa_free_exception(info.excPtr);
+      }
+    }
+  function ___cxa_end_catch() {
+      // Clear state flag.
+      _setThrew(0);
+      assert(exceptionCaught.length > 0);
+      // Call destructor if one is registered then clear it.
+      var info = exceptionCaught.pop();
   
-  var exceptionLast = 0;
+      exception_decRef(info);
+      exceptionLast = 0; // XXX in decRef?
+    }
+
+  function ___resumeException(ptr) {
+      if (!exceptionLast) { exceptionLast = ptr; }
+      throw ptr;
+    }
+  function ___cxa_find_matching_catch_2() {
+      var thrown = exceptionLast;
+      if (!thrown) {
+        // just pass through the null ptr
+        setTempRet0(0);
+        return 0;
+      }
+      var info = new ExceptionInfo(thrown);
+      info.set_adjusted_ptr(thrown);
+      var thrownType = info.get_type();
+      if (!thrownType) {
+        // just pass through the thrown ptr
+        setTempRet0(0);
+        return thrown;
+      }
+      var typeArray = Array.prototype.slice.call(arguments);
   
-  var uncaughtExceptionCount = 0;
+      // can_catch receives a **, add indirection
+      // The different catch blocks are denoted by different types.
+      // Due to inheritance, those types may not precisely match the
+      // type of the thrown object. Find one which matches, and
+      // return the type of the catch block which should be called.
+      for (var i = 0; i < typeArray.length; i++) {
+        var caughtType = typeArray[i];
+        if (caughtType === 0 || caughtType === thrownType) {
+          // Catch all clause matched or exactly the same type is caught
+          break;
+        }
+        var adjusted_ptr_addr = info.ptr + 16;
+        if (___cxa_can_catch(caughtType, thrownType, adjusted_ptr_addr)) {
+          setTempRet0(caughtType);
+          return thrown;
+        }
+      }
+      setTempRet0(thrownType);
+      return thrown;
+    }
+
+  function ___cxa_find_matching_catch_3() {
+      var thrown = exceptionLast;
+      if (!thrown) {
+        // just pass through the null ptr
+        setTempRet0(0);
+        return 0;
+      }
+      var info = new ExceptionInfo(thrown);
+      info.set_adjusted_ptr(thrown);
+      var thrownType = info.get_type();
+      if (!thrownType) {
+        // just pass through the thrown ptr
+        setTempRet0(0);
+        return thrown;
+      }
+      var typeArray = Array.prototype.slice.call(arguments);
+  
+      // can_catch receives a **, add indirection
+      // The different catch blocks are denoted by different types.
+      // Due to inheritance, those types may not precisely match the
+      // type of the thrown object. Find one which matches, and
+      // return the type of the catch block which should be called.
+      for (var i = 0; i < typeArray.length; i++) {
+        var caughtType = typeArray[i];
+        if (caughtType === 0 || caughtType === thrownType) {
+          // Catch all clause matched or exactly the same type is caught
+          break;
+        }
+        var adjusted_ptr_addr = info.ptr + 16;
+        if (___cxa_can_catch(caughtType, thrownType, adjusted_ptr_addr)) {
+          setTempRet0(caughtType);
+          return thrown;
+        }
+      }
+      setTempRet0(thrownType);
+      return thrown;
+    }
+
+
+  function ___cxa_rethrow() {
+      var info = exceptionCaught.pop();
+      if (!info) {
+        abort('no exception to throw');
+      }
+      var ptr = info.excPtr;
+      if (!info.get_rethrown()) {
+        // Only pop if the corresponding push was through rethrow_primary_exception
+        exceptionCaught.push(info);
+        info.set_rethrown(true);
+        info.set_caught(false);
+        uncaughtExceptionCount++;
+      }
+      exceptionLast = ptr;
+      throw ptr;
+    }
+
   function ___cxa_throw(ptr, type, destructor) {
       var info = new ExceptionInfo(ptr);
       // Initialize ExceptionInfo content after it was allocated in __cxa_allocate_exception.
       info.init(type, destructor);
       exceptionLast = ptr;
       uncaughtExceptionCount++;
-      throw ptr + " - Exception catching is disabled, this exception cannot be caught. Compile with -sNO_DISABLE_EXCEPTION_CATCHING or -sEXCEPTION_CATCHING_ALLOWED=[..] to catch.";
+      throw ptr;
     }
+
+  function ___cxa_uncaught_exceptions() {
+      return uncaughtExceptionCount;
+    }
+
 
   function setErrNo(value) {
       HEAP32[((___errno_location())>>2)] = value;
@@ -4306,142 +4646,61 @@ var ASM_CONSTS = {
       abort('native code called abort()');
     }
 
-  var JSEvents = {inEventHandler:0,removeAllEventListeners:function() {
-        for (var i = JSEvents.eventHandlers.length-1; i >= 0; --i) {
-          JSEvents._removeHandler(i);
-        }
-        JSEvents.eventHandlers = [];
-        JSEvents.deferredCalls = [];
-      },registerRemoveEventListeners:function() {
-        if (!JSEvents.removeEventListenersRegistered) {
-          __ATEXIT__.push(JSEvents.removeAllEventListeners);
-          JSEvents.removeEventListenersRegistered = true;
-        }
-      },deferredCalls:[],deferCall:function(targetFunction, precedence, argsList) {
-        function arraysHaveEqualContent(arrA, arrB) {
-          if (arrA.length != arrB.length) return false;
+  function _emscripten_set_main_loop_timing(mode, value) {
+      Browser.mainLoop.timingMode = mode;
+      Browser.mainLoop.timingValue = value;
   
-          for (var i in arrA) {
-            if (arrA[i] != arrB[i]) return false;
-          }
-          return true;
-        }
-        // Test if the given call was already queued, and if so, don't add it again.
-        for (var i in JSEvents.deferredCalls) {
-          var call = JSEvents.deferredCalls[i];
-          if (call.targetFunction == targetFunction && arraysHaveEqualContent(call.argsList, argsList)) {
-            return;
-          }
-        }
-        JSEvents.deferredCalls.push({
-          targetFunction: targetFunction,
-          precedence: precedence,
-          argsList: argsList
-        });
+      if (!Browser.mainLoop.func) {
+        err('emscripten_set_main_loop_timing: Cannot set timing mode for main loop since a main loop does not exist! Call emscripten_set_main_loop first to set one up.');
+        return 1; // Return non-zero on failure, can't set timing mode when there is no main loop.
+      }
   
-        JSEvents.deferredCalls.sort(function(x,y) { return x.precedence < y.precedence; });
-      },removeDeferredCalls:function(targetFunction) {
-        for (var i = 0; i < JSEvents.deferredCalls.length; ++i) {
-          if (JSEvents.deferredCalls[i].targetFunction == targetFunction) {
-            JSEvents.deferredCalls.splice(i, 1);
-            --i;
-          }
-        }
-      },canPerformEventHandlerRequests:function() {
-        return JSEvents.inEventHandler && JSEvents.currentEventHandler.allowsDeferredCalls;
-      },runDeferredCalls:function() {
-        if (!JSEvents.canPerformEventHandlerRequests()) {
-          return;
-        }
-        for (var i = 0; i < JSEvents.deferredCalls.length; ++i) {
-          var call = JSEvents.deferredCalls[i];
-          JSEvents.deferredCalls.splice(i, 1);
-          --i;
-          call.targetFunction.apply(null, call.argsList);
-        }
-      },eventHandlers:[],removeAllHandlersOnTarget:function(target, eventTypeString) {
-        for (var i = 0; i < JSEvents.eventHandlers.length; ++i) {
-          if (JSEvents.eventHandlers[i].target == target && 
-            (!eventTypeString || eventTypeString == JSEvents.eventHandlers[i].eventTypeString)) {
-             JSEvents._removeHandler(i--);
-           }
-        }
-      },_removeHandler:function(i) {
-        var h = JSEvents.eventHandlers[i];
-        h.target.removeEventListener(h.eventTypeString, h.eventListenerFunc, h.useCapture);
-        JSEvents.eventHandlers.splice(i, 1);
-      },registerOrRemoveHandler:function(eventHandler) {
-        var jsEventHandler = function jsEventHandler(event) {
-          // Increment nesting count for the event handler.
-          ++JSEvents.inEventHandler;
-          JSEvents.currentEventHandler = eventHandler;
-          // Process any old deferred calls the user has placed.
-          JSEvents.runDeferredCalls();
-          // Process the actual event, calls back to user C code handler.
-          eventHandler.handlerFunc(event);
-          // Process any new deferred calls that were placed right now from this event handler.
-          JSEvents.runDeferredCalls();
-          // Out of event handler - restore nesting count.
-          --JSEvents.inEventHandler;
-        };
+      if (!Browser.mainLoop.running) {
         
-        if (eventHandler.callbackfunc) {
-          eventHandler.eventListenerFunc = jsEventHandler;
-          eventHandler.target.addEventListener(eventHandler.eventTypeString, jsEventHandler, eventHandler.useCapture);
-          JSEvents.eventHandlers.push(eventHandler);
-          JSEvents.registerRemoveEventListeners();
-        } else {
-          for (var i = 0; i < JSEvents.eventHandlers.length; ++i) {
-            if (JSEvents.eventHandlers[i].target == eventHandler.target
-             && JSEvents.eventHandlers[i].eventTypeString == eventHandler.eventTypeString) {
-               JSEvents._removeHandler(i--);
-             }
+        Browser.mainLoop.running = true;
+      }
+      if (mode == 0 /*EM_TIMING_SETTIMEOUT*/) {
+        Browser.mainLoop.scheduler = function Browser_mainLoop_scheduler_setTimeout() {
+          var timeUntilNextTick = Math.max(0, Browser.mainLoop.tickStartTime + value - _emscripten_get_now())|0;
+          setTimeout(Browser.mainLoop.runner, timeUntilNextTick); // doing this each time means that on exception, we stop
+        };
+        Browser.mainLoop.method = 'timeout';
+      } else if (mode == 1 /*EM_TIMING_RAF*/) {
+        Browser.mainLoop.scheduler = function Browser_mainLoop_scheduler_rAF() {
+          Browser.requestAnimationFrame(Browser.mainLoop.runner);
+        };
+        Browser.mainLoop.method = 'rAF';
+      } else if (mode == 2 /*EM_TIMING_SETIMMEDIATE*/) {
+        if (typeof setImmediate == 'undefined') {
+          // Emulate setImmediate. (note: not a complete polyfill, we don't emulate clearImmediate() to keep code size to minimum, since not needed)
+          var setImmediates = [];
+          var emscriptenMainLoopMessageId = 'setimmediate';
+          var Browser_setImmediate_messageHandler = function(/** @type {Event} */ event) {
+            // When called in current thread or Worker, the main loop ID is structured slightly different to accommodate for --proxy-to-worker runtime listening to Worker events,
+            // so check for both cases.
+            if (event.data === emscriptenMainLoopMessageId || event.data.target === emscriptenMainLoopMessageId) {
+              event.stopPropagation();
+              setImmediates.shift()();
+            }
           }
+          addEventListener("message", Browser_setImmediate_messageHandler, true);
+          setImmediate = /** @type{function(function(): ?, ...?): number} */(function Browser_emulated_setImmediate(func) {
+            setImmediates.push(func);
+            if (ENVIRONMENT_IS_WORKER) {
+              if (Module['setImmediates'] === undefined) Module['setImmediates'] = [];
+              Module['setImmediates'].push(func);
+              postMessage({target: emscriptenMainLoopMessageId}); // In --proxy-to-worker, route the message via proxyClient.js
+            } else postMessage(emscriptenMainLoopMessageId, "*"); // On the main thread, can just send the message to itself.
+          })
         }
-      },getNodeNameForTarget:function(target) {
-        if (!target) return '';
-        if (target == window) return '#window';
-        if (target == screen) return '#screen';
-        return (target && target.nodeName) ? target.nodeName : '';
-      },fullscreenEnabled:function() {
-        return document.fullscreenEnabled
-        // Safari 13.0.3 on macOS Catalina 10.15.1 still ships with prefixed webkitFullscreenEnabled.
-        // TODO: If Safari at some point ships with unprefixed version, update the version check above.
-        || document.webkitFullscreenEnabled
-         ;
-      }};
-  
-  function maybeCStringToJsString(cString) {
-      // "cString > 2" checks if the input is a number, and isn't of the special
-      // values we accept here, EMSCRIPTEN_EVENT_TARGET_* (which map to 0, 1, 2).
-      // In other words, if cString > 2 then it's a pointer to a valid place in
-      // memory, and points to a C string.
-      return cString > 2 ? UTF8ToString(cString) : cString;
-    }
-  
-  var specialHTMLTargets = [0, typeof document != 'undefined' ? document : 0, typeof window != 'undefined' ? window : 0];
-  function findEventTarget(target) {
-      target = maybeCStringToJsString(target);
-      var domElement = specialHTMLTargets[target] || (typeof document != 'undefined' ? document.querySelector(target) : undefined);
-      return domElement;
-    }
-  function findCanvasEventTarget(target) { return findEventTarget(target); }
-  function _emscripten_get_canvas_element_size(target, width, height) {
-      var canvas = findCanvasEventTarget(target);
-      if (!canvas) return -4;
-      HEAP32[((width)>>2)] = canvas.width;
-      HEAP32[((height)>>2)] = canvas.height;
-    }
-
-  function _emscripten_get_mouse_status(mouseState) {
-      if (!JSEvents.mouseEvent) return -7;
-      // HTML5 does not really have a polling API for mouse events, so implement one manually by
-      // returning the data from the most recently received event. This requires that user has registered
-      // at least some no-op function as an event handler to any of the mouse function.
-      HEAP8.set(HEAP8.subarray(JSEvents.mouseEvent, JSEvents.mouseEvent + 72), mouseState);
+        Browser.mainLoop.scheduler = function Browser_mainLoop_scheduler_setImmediate() {
+          setImmediate(Browser.mainLoop.runner);
+        };
+        Browser.mainLoop.method = 'immediate';
+      }
       return 0;
     }
-
+  
   var _emscripten_get_now;if (ENVIRONMENT_IS_NODE) {
     _emscripten_get_now = () => {
       var t = process['hrtime']();
@@ -4449,24 +4708,120 @@ var ASM_CONSTS = {
     };
   } else _emscripten_get_now = () => performance.now();
   ;
-
-  function _emscripten_memcpy_big(dest, src, num) {
-      HEAPU8.copyWithin(dest, src, src + num);
-    }
-
-  function getHeapMax() {
-      return HEAPU8.length;
+  
+  function runtimeKeepalivePush() {
     }
   
-  function abortOnCannotGrowMemory(requestedSize) {
-      abort('Cannot enlarge memory arrays to size ' + requestedSize + ' bytes (OOM). Either (1) compile with -sINITIAL_MEMORY=X with X higher than the current value ' + HEAP8.length + ', (2) compile with -sALLOW_MEMORY_GROWTH which allows increasing the size at runtime, or (3) if you want malloc to return NULL (0) instead of this abort, compile with -sABORTING_MALLOC=0');
+  function _exit(status) {
+      // void _exit(int status);
+      // http://pubs.opengroup.org/onlinepubs/000095399/functions/exit.html
+      exit(status);
     }
-  function _emscripten_resize_heap(requestedSize) {
-      var oldSize = HEAPU8.length;
-      requestedSize = requestedSize >>> 0;
-      abortOnCannotGrowMemory(requestedSize);
+  function maybeExit() {
     }
-
+  
+    /**
+     * @param {number=} arg
+     * @param {boolean=} noSetTiming
+     */
+  function setMainLoop(browserIterationFunc, fps, simulateInfiniteLoop, arg, noSetTiming) {
+      assert(!Browser.mainLoop.func, 'emscripten_set_main_loop: there can only be one main loop function at once: call emscripten_cancel_main_loop to cancel the previous one before setting a new one with different parameters.');
+  
+      Browser.mainLoop.func = browserIterationFunc;
+      Browser.mainLoop.arg = arg;
+  
+      var thisMainLoopId = Browser.mainLoop.currentlyRunningMainloop;
+      function checkIsRunning() {
+        if (thisMainLoopId < Browser.mainLoop.currentlyRunningMainloop) {
+          
+          maybeExit();
+          return false;
+        }
+        return true;
+      }
+  
+      // We create the loop runner here but it is not actually running until
+      // _emscripten_set_main_loop_timing is called (which might happen a
+      // later time).  This member signifies that the current runner has not
+      // yet been started so that we can call runtimeKeepalivePush when it
+      // gets it timing set for the first time.
+      Browser.mainLoop.running = false;
+      Browser.mainLoop.runner = function Browser_mainLoop_runner() {
+        if (ABORT) return;
+        if (Browser.mainLoop.queue.length > 0) {
+          var start = Date.now();
+          var blocker = Browser.mainLoop.queue.shift();
+          blocker.func(blocker.arg);
+          if (Browser.mainLoop.remainingBlockers) {
+            var remaining = Browser.mainLoop.remainingBlockers;
+            var next = remaining%1 == 0 ? remaining-1 : Math.floor(remaining);
+            if (blocker.counted) {
+              Browser.mainLoop.remainingBlockers = next;
+            } else {
+              // not counted, but move the progress along a tiny bit
+              next = next + 0.5; // do not steal all the next one's progress
+              Browser.mainLoop.remainingBlockers = (8*remaining + next)/9;
+            }
+          }
+          out('main loop blocker "' + blocker.name + '" took ' + (Date.now() - start) + ' ms'); //, left: ' + Browser.mainLoop.remainingBlockers);
+          Browser.mainLoop.updateStatus();
+  
+          // catches pause/resume main loop from blocker execution
+          if (!checkIsRunning()) return;
+  
+          setTimeout(Browser.mainLoop.runner, 0);
+          return;
+        }
+  
+        // catch pauses from non-main loop sources
+        if (!checkIsRunning()) return;
+  
+        // Implement very basic swap interval control
+        Browser.mainLoop.currentFrameNumber = Browser.mainLoop.currentFrameNumber + 1 | 0;
+        if (Browser.mainLoop.timingMode == 1/*EM_TIMING_RAF*/ && Browser.mainLoop.timingValue > 1 && Browser.mainLoop.currentFrameNumber % Browser.mainLoop.timingValue != 0) {
+          // Not the scheduled time to render this frame - skip.
+          Browser.mainLoop.scheduler();
+          return;
+        } else if (Browser.mainLoop.timingMode == 0/*EM_TIMING_SETTIMEOUT*/) {
+          Browser.mainLoop.tickStartTime = _emscripten_get_now();
+        }
+  
+        // Signal GL rendering layer that processing of a new frame is about to start. This helps it optimize
+        // VBO double-buffering and reduce GPU stalls.
+  
+        if (Browser.mainLoop.method === 'timeout' && Module.ctx) {
+          warnOnce('Looks like you are rendering without using requestAnimationFrame for the main loop. You should use 0 for the frame rate in emscripten_set_main_loop in order to use requestAnimationFrame, as that can greatly improve your frame rates!');
+          Browser.mainLoop.method = ''; // just warn once per call to set main loop
+        }
+  
+        Browser.mainLoop.runIter(browserIterationFunc);
+  
+        checkStackCookie();
+  
+        // catch pauses from the main loop itself
+        if (!checkIsRunning()) return;
+  
+        // Queue new audio data. This is important to be right after the main loop invocation, so that we will immediately be able
+        // to queue the newest produced audio samples.
+        // TODO: Consider adding pre- and post- rAF callbacks so that GL.newRenderingFrameStarted() and SDL.audio.queueNewAudioData()
+        //       do not need to be hardcoded into this function, but can be more generic.
+        if (typeof SDL == 'object' && SDL.audio && SDL.audio.queueNewAudioData) SDL.audio.queueNewAudioData();
+  
+        Browser.mainLoop.scheduler();
+      }
+  
+      if (!noSetTiming) {
+        if (fps && fps > 0) _emscripten_set_main_loop_timing(0/*EM_TIMING_SETTIMEOUT*/, 1000.0 / fps);
+        else _emscripten_set_main_loop_timing(1/*EM_TIMING_RAF*/, 1); // Do rAF by rendering each frame (no decimating)
+  
+        Browser.mainLoop.scheduler();
+      }
+  
+      if (simulateInfiniteLoop) {
+        throw 'unwind';
+      }
+    }
+  
   /** @param {boolean=} synchronous */
   function callUserCallback(func, synchronous) {
       if (ABORT) {
@@ -4483,9 +4838,6 @@ var ASM_CONSTS = {
       } catch (e) {
         handleException(e);
       }
-    }
-  
-  function runtimeKeepalivePush() {
     }
   
   function runtimeKeepalivePop() {
@@ -5089,170 +5441,1936 @@ var ASM_CONSTS = {
           }
         }
       }};
-  function _emscripten_set_main_loop_timing(mode, value) {
-      Browser.mainLoop.timingMode = mode;
-      Browser.mainLoop.timingValue = value;
-  
-      if (!Browser.mainLoop.func) {
-        err('emscripten_set_main_loop_timing: Cannot set timing mode for main loop since a main loop does not exist! Call emscripten_set_main_loop first to set one up.');
-        return 1; // Return non-zero on failure, can't set timing mode when there is no main loop.
-      }
-  
-      if (!Browser.mainLoop.running) {
-        
-        Browser.mainLoop.running = true;
-      }
-      if (mode == 0 /*EM_TIMING_SETTIMEOUT*/) {
-        Browser.mainLoop.scheduler = function Browser_mainLoop_scheduler_setTimeout() {
-          var timeUntilNextTick = Math.max(0, Browser.mainLoop.tickStartTime + value - _emscripten_get_now())|0;
-          setTimeout(Browser.mainLoop.runner, timeUntilNextTick); // doing this each time means that on exception, we stop
-        };
-        Browser.mainLoop.method = 'timeout';
-      } else if (mode == 1 /*EM_TIMING_RAF*/) {
-        Browser.mainLoop.scheduler = function Browser_mainLoop_scheduler_rAF() {
-          Browser.requestAnimationFrame(Browser.mainLoop.runner);
-        };
-        Browser.mainLoop.method = 'rAF';
-      } else if (mode == 2 /*EM_TIMING_SETIMMEDIATE*/) {
-        if (typeof setImmediate == 'undefined') {
-          // Emulate setImmediate. (note: not a complete polyfill, we don't emulate clearImmediate() to keep code size to minimum, since not needed)
-          var setImmediates = [];
-          var emscriptenMainLoopMessageId = 'setimmediate';
-          var Browser_setImmediate_messageHandler = function(/** @type {Event} */ event) {
-            // When called in current thread or Worker, the main loop ID is structured slightly different to accommodate for --proxy-to-worker runtime listening to Worker events,
-            // so check for both cases.
-            if (event.data === emscriptenMainLoopMessageId || event.data.target === emscriptenMainLoopMessageId) {
-              event.stopPropagation();
-              setImmediates.shift()();
-            }
-          }
-          addEventListener("message", Browser_setImmediate_messageHandler, true);
-          setImmediate = /** @type{function(function(): ?, ...?): number} */(function Browser_emulated_setImmediate(func) {
-            setImmediates.push(func);
-            if (ENVIRONMENT_IS_WORKER) {
-              if (Module['setImmediates'] === undefined) Module['setImmediates'] = [];
-              Module['setImmediates'].push(func);
-              postMessage({target: emscriptenMainLoopMessageId}); // In --proxy-to-worker, route the message via proxyClient.js
-            } else postMessage(emscriptenMainLoopMessageId, "*"); // On the main thread, can just send the message to itself.
-          })
+  var AL = {QUEUE_INTERVAL:25,QUEUE_LOOKAHEAD:0.1,DEVICE_NAME:"Emscripten OpenAL",CAPTURE_DEVICE_NAME:"Emscripten OpenAL capture",ALC_EXTENSIONS:{ALC_SOFT_pause_device:true,ALC_SOFT_HRTF:true},AL_EXTENSIONS:{AL_EXT_float32:true,AL_SOFT_loop_points:true,AL_SOFT_source_length:true,AL_EXT_source_distance_model:true,AL_SOFT_source_spatialize:true},_alcErr:0,alcErr:0,deviceRefCounts:{},alcStringCache:{},paused:false,stringCache:{},contexts:{},currentCtx:null,buffers:{0:{id:0,refCount:0,audioBuf:null,frequency:0,bytesPerSample:2,channels:1,length:0}},paramArray:[],_nextId:1,newId:function() {
+        return AL.freeIds.length > 0 ? AL.freeIds.pop() : AL._nextId++;
+      },freeIds:[],scheduleContextAudio:function(ctx) {
+        // If we are animating using the requestAnimationFrame method, then the main loop does not run when in the background.
+        // To give a perfect glitch-free audio stop when switching from foreground to background, we need to avoid updating
+        // audio altogether when in the background, so detect that case and kill audio buffer streaming if so.
+        if (Browser.mainLoop.timingMode === 1 /* EM_TIMING_RAF */ && document['visibilityState'] != 'visible') {
+          return;
         }
-        Browser.mainLoop.scheduler = function Browser_mainLoop_scheduler_setImmediate() {
-          setImmediate(Browser.mainLoop.runner);
-        };
-        Browser.mainLoop.method = 'immediate';
-      }
-      return 0;
-    }
   
-  function _exit(status) {
-      // void _exit(int status);
-      // http://pubs.opengroup.org/onlinepubs/000095399/functions/exit.html
-      exit(status);
-    }
-  function maybeExit() {
-    }
-  
-    /**
-     * @param {number=} arg
-     * @param {boolean=} noSetTiming
-     */
-  function setMainLoop(browserIterationFunc, fps, simulateInfiniteLoop, arg, noSetTiming) {
-      assert(!Browser.mainLoop.func, 'emscripten_set_main_loop: there can only be one main loop function at once: call emscripten_cancel_main_loop to cancel the previous one before setting a new one with different parameters.');
-  
-      Browser.mainLoop.func = browserIterationFunc;
-      Browser.mainLoop.arg = arg;
-  
-      var thisMainLoopId = Browser.mainLoop.currentlyRunningMainloop;
-      function checkIsRunning() {
-        if (thisMainLoopId < Browser.mainLoop.currentlyRunningMainloop) {
-          
-          maybeExit();
-          return false;
+        for (var i in ctx.sources) {
+          AL.scheduleSourceAudio(ctx.sources[i]);
         }
-        return true;
-      }
+      },scheduleSourceAudio:function(src, lookahead) {
+        // See comment on scheduleContextAudio above.
+        if (Browser.mainLoop.timingMode === 1 /*EM_TIMING_RAF*/ && document['visibilityState'] != 'visible') {
+          return;
+        }
+        if (src.state !== 0x1012 /* AL_PLAYING */) {
+          return;
+        }
   
-      // We create the loop runner here but it is not actually running until
-      // _emscripten_set_main_loop_timing is called (which might happen a
-      // later time).  This member signifies that the current runner has not
-      // yet been started so that we can call runtimeKeepalivePush when it
-      // gets it timing set for the first time.
-      Browser.mainLoop.running = false;
-      Browser.mainLoop.runner = function Browser_mainLoop_runner() {
-        if (ABORT) return;
-        if (Browser.mainLoop.queue.length > 0) {
-          var start = Date.now();
-          var blocker = Browser.mainLoop.queue.shift();
-          blocker.func(blocker.arg);
-          if (Browser.mainLoop.remainingBlockers) {
-            var remaining = Browser.mainLoop.remainingBlockers;
-            var next = remaining%1 == 0 ? remaining-1 : Math.floor(remaining);
-            if (blocker.counted) {
-              Browser.mainLoop.remainingBlockers = next;
+        var currentTime = AL.updateSourceTime(src);
+  
+        var startTime = src.bufStartTime;
+        var startOffset = src.bufOffset;
+        var bufCursor = src.bufsProcessed;
+  
+        // Advance past any audio that is already scheduled
+        for (var i = 0; i < src.audioQueue.length; i++) {
+          var audioSrc = src.audioQueue[i];
+          startTime = audioSrc._startTime + audioSrc._duration;
+          startOffset = 0.0;
+          bufCursor += audioSrc._skipCount + 1;
+        }
+  
+        if (!lookahead) {
+          lookahead = AL.QUEUE_LOOKAHEAD;
+        }
+        var lookaheadTime = currentTime + lookahead;
+        var skipCount = 0;
+        while (startTime < lookaheadTime) {
+          if (bufCursor >= src.bufQueue.length) {
+            if (src.looping) {
+              bufCursor %= src.bufQueue.length;
             } else {
-              // not counted, but move the progress along a tiny bit
-              next = next + 0.5; // do not steal all the next one's progress
-              Browser.mainLoop.remainingBlockers = (8*remaining + next)/9;
+              break;
             }
           }
-          out('main loop blocker "' + blocker.name + '" took ' + (Date.now() - start) + ' ms'); //, left: ' + Browser.mainLoop.remainingBlockers);
-          Browser.mainLoop.updateStatus();
   
-          // catches pause/resume main loop from blocker execution
-          if (!checkIsRunning()) return;
+          var buf = src.bufQueue[bufCursor % src.bufQueue.length];
+          // If the buffer contains no data, skip it
+          if (buf.length === 0) {
+            skipCount++;
+            // If we've gone through the whole queue and everything is 0 length, just give up
+            if (skipCount === src.bufQueue.length) {
+              break;
+            }
+          } else {
+            var audioSrc = src.context.audioCtx.createBufferSource();
+            audioSrc.buffer = buf.audioBuf;
+            audioSrc.playbackRate.value = src.playbackRate;
+            if (buf.audioBuf._loopStart || buf.audioBuf._loopEnd) {
+              audioSrc.loopStart = buf.audioBuf._loopStart;
+              audioSrc.loopEnd = buf.audioBuf._loopEnd;
+            }
   
-          setTimeout(Browser.mainLoop.runner, 0);
+            var duration = 0.0;
+            // If the source is a looping static buffer, use native looping for gapless playback
+            if (src.type === 0x1028 /* AL_STATIC */ && src.looping) {
+              duration = Number.POSITIVE_INFINITY;
+              audioSrc.loop = true;
+              if (buf.audioBuf._loopStart) {
+                audioSrc.loopStart = buf.audioBuf._loopStart;
+              }
+              if (buf.audioBuf._loopEnd) {
+                audioSrc.loopEnd = buf.audioBuf._loopEnd;
+              }
+            } else {
+              duration = (buf.audioBuf.duration - startOffset) / src.playbackRate;
+            }
+  
+            audioSrc._startOffset = startOffset;
+            audioSrc._duration = duration;
+            audioSrc._skipCount = skipCount;
+            skipCount = 0;
+  
+            audioSrc.connect(src.gain);
+  
+            if (typeof audioSrc.start != 'undefined') {
+              // Sample the current time as late as possible to mitigate drift
+              startTime = Math.max(startTime, src.context.audioCtx.currentTime);
+              audioSrc.start(startTime, startOffset);
+            } else if (typeof audioSrc.noteOn != 'undefined') {
+              startTime = Math.max(startTime, src.context.audioCtx.currentTime);
+              audioSrc.noteOn(startTime);
+            }
+            audioSrc._startTime = startTime;
+            src.audioQueue.push(audioSrc);
+  
+            startTime += duration;
+          }
+  
+          startOffset = 0.0;
+          bufCursor++;
+        }
+      },updateSourceTime:function(src) {
+        var currentTime = src.context.audioCtx.currentTime;
+        if (src.state !== 0x1012 /* AL_PLAYING */) {
+          return currentTime;
+        }
+  
+        // if the start time is unset, determine it based on the current offset.
+        // This will be the case when a source is resumed after being paused, and
+        // allows us to pretend that the source actually started playing some time
+        // in the past such that it would just now have reached the stored offset.
+        if (!isFinite(src.bufStartTime)) {
+          src.bufStartTime = currentTime - src.bufOffset / src.playbackRate;
+          src.bufOffset = 0.0;
+        }
+  
+        var nextStartTime = 0.0;
+        while (src.audioQueue.length) {
+          var audioSrc = src.audioQueue[0];
+          src.bufsProcessed += audioSrc._skipCount;
+          nextStartTime = audioSrc._startTime + audioSrc._duration; // n.b. audioSrc._duration already factors in playbackRate, so no divide by src.playbackRate on it.
+  
+          if (currentTime < nextStartTime) {
+            break;
+          }
+  
+          src.audioQueue.shift();
+          src.bufStartTime = nextStartTime;
+          src.bufOffset = 0.0;
+          src.bufsProcessed++;
+        }
+  
+        if (src.bufsProcessed >= src.bufQueue.length && !src.looping) {
+          // The source has played its entire queue and is non-looping, so just mark it as stopped.
+          AL.setSourceState(src, 0x1014 /* AL_STOPPED */);
+        } else if (src.type === 0x1028 /* AL_STATIC */ && src.looping) {
+          // If the source is a looping static buffer, determine the buffer offset based on the loop points
+          var buf = src.bufQueue[0];
+          if (buf.length === 0) {
+            src.bufOffset = 0.0;
+          } else {
+            var delta = (currentTime - src.bufStartTime) * src.playbackRate;
+            var loopStart = buf.audioBuf._loopStart || 0.0;
+            var loopEnd = buf.audioBuf._loopEnd || buf.audioBuf.duration;
+            if (loopEnd <= loopStart) {
+              loopEnd = buf.audioBuf.duration;
+            }
+  
+            if (delta < loopEnd) {
+              src.bufOffset = delta;
+            } else {
+              src.bufOffset = loopStart + (delta - loopStart) % (loopEnd - loopStart);
+            }
+          }
+        } else if (src.audioQueue[0]) {
+          // The source is still actively playing, so we just need to calculate where we are in the current buffer
+          // so it can be remembered if the source gets paused.
+          src.bufOffset = (currentTime - src.audioQueue[0]._startTime) * src.playbackRate;
+        } else {
+          // The source hasn't finished yet, but there is no scheduled audio left for it. This can be because
+          // the source has just been started/resumed, or due to an underrun caused by a long blocking operation.
+          // We need to determine what state we would be in by this point in time so that when we next schedule
+          // audio playback, it will be just as if no underrun occurred.
+  
+          if (src.type !== 0x1028 /* AL_STATIC */ && src.looping) {
+            // if the source is a looping buffer queue, let's first calculate the queue duration, so we can
+            // quickly fast forward past any full loops of the queue and only worry about the remainder.
+            var srcDuration = AL.sourceDuration(src) / src.playbackRate;
+            if (srcDuration > 0.0) {
+              src.bufStartTime += Math.floor((currentTime - src.bufStartTime) / srcDuration) * srcDuration;
+            }
+          }
+  
+          // Since we've already skipped any full-queue loops if there were any, we just need to find
+          // out where in the queue the remaining time puts us, which won't require stepping through the
+          // entire queue more than once.
+          for (var i = 0; i < src.bufQueue.length; i++) {
+            if (src.bufsProcessed >= src.bufQueue.length) {
+              if (src.looping) {
+                src.bufsProcessed %= src.bufQueue.length;
+              } else {
+                AL.setSourceState(src, 0x1014 /* AL_STOPPED */);
+                break;
+              }
+            }
+  
+            var buf = src.bufQueue[src.bufsProcessed];
+            if (buf.length > 0) {
+              nextStartTime = src.bufStartTime + buf.audioBuf.duration / src.playbackRate;
+  
+              if (currentTime < nextStartTime) {
+                src.bufOffset = (currentTime - src.bufStartTime) * src.playbackRate;
+                break;
+              }
+  
+              src.bufStartTime = nextStartTime;
+            }
+  
+            src.bufOffset = 0.0;
+            src.bufsProcessed++;
+          }
+        }
+  
+        return currentTime;
+      },cancelPendingSourceAudio:function(src) {
+        AL.updateSourceTime(src);
+  
+        for (var i = 1; i < src.audioQueue.length; i++) {
+          var audioSrc = src.audioQueue[i];
+          audioSrc.stop();
+        }
+  
+        if (src.audioQueue.length > 1) {
+          src.audioQueue.length = 1;
+        }
+      },stopSourceAudio:function(src) {
+        for (var i = 0; i < src.audioQueue.length; i++) {
+          src.audioQueue[i].stop();
+        }
+        src.audioQueue.length = 0;
+      },setSourceState:function(src, state) {
+        if (state === 0x1012 /* AL_PLAYING */) {
+          if (src.state === 0x1012 /* AL_PLAYING */ || src.state == 0x1014 /* AL_STOPPED */) {
+            src.bufsProcessed = 0;
+            src.bufOffset = 0.0;
+          } else {
+          }
+  
+          AL.stopSourceAudio(src);
+  
+          src.state = 0x1012 /* AL_PLAYING */;
+          src.bufStartTime = Number.NEGATIVE_INFINITY;
+          AL.scheduleSourceAudio(src);
+        } else if (state === 0x1013 /* AL_PAUSED */) {
+          if (src.state === 0x1012 /* AL_PLAYING */) {
+            // Store off the current offset to restore with on resume.
+            AL.updateSourceTime(src);
+            AL.stopSourceAudio(src);
+  
+            src.state = 0x1013 /* AL_PAUSED */;
+          }
+        } else if (state === 0x1014 /* AL_STOPPED */) {
+          if (src.state !== 0x1011 /* AL_INITIAL */) {
+            src.state = 0x1014 /* AL_STOPPED */;
+            src.bufsProcessed = src.bufQueue.length;
+            src.bufStartTime = Number.NEGATIVE_INFINITY;
+            src.bufOffset = 0.0;
+            AL.stopSourceAudio(src);
+          }
+        } else if (state === 0x1011 /* AL_INITIAL */) {
+          if (src.state !== 0x1011 /* AL_INITIAL */) {
+            src.state = 0x1011 /* AL_INITIAL */;
+            src.bufsProcessed = 0;
+            src.bufStartTime = Number.NEGATIVE_INFINITY;
+            src.bufOffset = 0.0;
+            AL.stopSourceAudio(src);
+          }
+        }
+      },initSourcePanner:function(src) {
+        if (src.type === 0x1030 /* AL_UNDETERMINED */) {
           return;
         }
   
-        // catch pauses from non-main loop sources
-        if (!checkIsRunning()) return;
+        // Find the first non-zero buffer in the queue to determine the proper format
+        var templateBuf = AL.buffers[0];
+        for (var i = 0; i < src.bufQueue.length; i++) {
+          if (src.bufQueue[i].id !== 0) {
+            templateBuf = src.bufQueue[i];
+            break;
+          }
+        }
+        // Create a panner if AL_SOURCE_SPATIALIZE_SOFT is set to true, or alternatively if it's set to auto and the source is mono
+        if (src.spatialize === 1 /* AL_TRUE */ || (src.spatialize === 2 /* AL_AUTO_SOFT */ && templateBuf.channels === 1)) {
+          if (src.panner) {
+            return;
+          }
+          src.panner = src.context.audioCtx.createPanner();
   
-        // Implement very basic swap interval control
-        Browser.mainLoop.currentFrameNumber = Browser.mainLoop.currentFrameNumber + 1 | 0;
-        if (Browser.mainLoop.timingMode == 1/*EM_TIMING_RAF*/ && Browser.mainLoop.timingValue > 1 && Browser.mainLoop.currentFrameNumber % Browser.mainLoop.timingValue != 0) {
-          // Not the scheduled time to render this frame - skip.
-          Browser.mainLoop.scheduler();
+          AL.updateSourceGlobal(src);
+          AL.updateSourceSpace(src);
+  
+          src.panner.connect(src.context.gain);
+          src.gain.disconnect();
+          src.gain.connect(src.panner);
+        } else {
+          if (!src.panner) {
+            return;
+          }
+  
+          src.panner.disconnect();
+          src.gain.disconnect();
+          src.gain.connect(src.context.gain);
+          src.panner = null;
+        }
+      },updateContextGlobal:function(ctx) {
+        for (var i in ctx.sources) {
+          AL.updateSourceGlobal(ctx.sources[i]);
+        }
+      },updateSourceGlobal:function(src) {
+        var panner = src.panner;
+        if (!panner) {
           return;
-        } else if (Browser.mainLoop.timingMode == 0/*EM_TIMING_SETTIMEOUT*/) {
-          Browser.mainLoop.tickStartTime = _emscripten_get_now();
         }
   
-        // Signal GL rendering layer that processing of a new frame is about to start. This helps it optimize
-        // VBO double-buffering and reduce GPU stalls.
+        panner.refDistance = src.refDistance;
+        panner.maxDistance = src.maxDistance;
+        panner.rolloffFactor = src.rolloffFactor;
   
-        if (Browser.mainLoop.method === 'timeout' && Module.ctx) {
-          warnOnce('Looks like you are rendering without using requestAnimationFrame for the main loop. You should use 0 for the frame rate in emscripten_set_main_loop in order to use requestAnimationFrame, as that can greatly improve your frame rates!');
-          Browser.mainLoop.method = ''; // just warn once per call to set main loop
+        panner.panningModel = src.context.hrtf ? 'HRTF' : 'equalpower';
+  
+        // Use the source's distance model if AL_SOURCE_DISTANCE_MODEL is enabled
+        var distanceModel = src.context.sourceDistanceModel ? src.distanceModel : src.context.distanceModel;
+        switch (distanceModel) {
+        case 0 /* AL_NONE */:
+          panner.distanceModel = 'inverse';
+          panner.refDistance = 3.40282e38 /* FLT_MAX */;
+          break;
+        case 0xd001 /* AL_INVERSE_DISTANCE */:
+        case 0xd002 /* AL_INVERSE_DISTANCE_CLAMPED */:
+          panner.distanceModel = 'inverse';
+          break;
+        case 0xd003 /* AL_LINEAR_DISTANCE */:
+        case 0xd004 /* AL_LINEAR_DISTANCE_CLAMPED */:
+          panner.distanceModel = 'linear';
+          break;
+        case 0xd005 /* AL_EXPONENT_DISTANCE */:
+        case 0xd006 /* AL_EXPONENT_DISTANCE_CLAMPED */:
+          panner.distanceModel = 'exponential';
+          break;
+        }
+      },updateListenerSpace:function(ctx) {
+        var listener = ctx.audioCtx.listener;
+        if (listener.positionX) {
+          listener.positionX.value = ctx.listener.position[0];
+          listener.positionY.value = ctx.listener.position[1];
+          listener.positionZ.value = ctx.listener.position[2];
+        } else {
+          listener.setPosition(ctx.listener.position[0], ctx.listener.position[1], ctx.listener.position[2]);
+        }
+        if (listener.forwardX) {
+          listener.forwardX.value = ctx.listener.direction[0];
+          listener.forwardY.value = ctx.listener.direction[1];
+          listener.forwardZ.value = ctx.listener.direction[2];
+          listener.upX.value = ctx.listener.up[0];
+          listener.upY.value = ctx.listener.up[1];
+          listener.upZ.value = ctx.listener.up[2];
+        } else {
+          listener.setOrientation(
+            ctx.listener.direction[0], ctx.listener.direction[1], ctx.listener.direction[2],
+            ctx.listener.up[0], ctx.listener.up[1], ctx.listener.up[2]);
         }
   
-        Browser.mainLoop.runIter(browserIterationFunc);
+        // Update sources that are relative to the listener
+        for (var i in ctx.sources) {
+          AL.updateSourceSpace(ctx.sources[i]);
+        }
+      },updateSourceSpace:function(src) {
+        if (!src.panner) {
+          return;
+        }
+        var panner = src.panner;
   
-        checkStackCookie();
+        var posX = src.position[0];
+        var posY = src.position[1];
+        var posZ = src.position[2];
+        var dirX = src.direction[0];
+        var dirY = src.direction[1];
+        var dirZ = src.direction[2];
   
-        // catch pauses from the main loop itself
-        if (!checkIsRunning()) return;
+        var listener = src.context.listener;
+        var lPosX = listener.position[0];
+        var lPosY = listener.position[1];
+        var lPosZ = listener.position[2];
   
-        // Queue new audio data. This is important to be right after the main loop invocation, so that we will immediately be able
-        // to queue the newest produced audio samples.
-        // TODO: Consider adding pre- and post- rAF callbacks so that GL.newRenderingFrameStarted() and SDL.audio.queueNewAudioData()
-        //       do not need to be hardcoded into this function, but can be more generic.
-        if (typeof SDL == 'object' && SDL.audio && SDL.audio.queueNewAudioData) SDL.audio.queueNewAudioData();
+        // WebAudio does spatialization in world-space coordinates, meaning both the buffer sources and
+        // the listener position are in the same absolute coordinate system relative to a fixed origin.
+        // By default, OpenAL works this way as well, but it also provides a "listener relative" mode, where
+        // a buffer source's coordinate are interpreted not in absolute world space, but as being relative
+        // to the listener object itself, so as the listener moves the source appears to move with it
+        // with no update required. Since web audio does not support this mode, we must transform the source
+        // coordinates from listener-relative space to absolute world space.
+        //
+        // We do this via affine transformation matrices applied to the source position and source direction.
+        // A change-of-basis converts from listener-space displacements to world-space displacements,
+        // which must be done for both the source position and direction. Lastly, the source position must be
+        // added to the listener position to get the final source position, since the source position represents
+        // a displacement from the listener.
+        if (src.relative) {
+          // Negate the listener direction since forward is -Z.
+          var lBackX = -listener.direction[0];
+          var lBackY = -listener.direction[1];
+          var lBackZ = -listener.direction[2];
+          var lUpX = listener.up[0];
+          var lUpY = listener.up[1];
+          var lUpZ = listener.up[2];
   
-        Browser.mainLoop.scheduler();
+          var inverseMagnitude = function(x, y, z) {
+            var length = Math.sqrt(x * x + y * y + z * z);
+  
+            if (length < Number.EPSILON) {
+              return 0.0;
+            }
+  
+            return 1.0 / length;
+          };
+  
+          // Normalize the Back vector
+          var invMag = inverseMagnitude(lBackX, lBackY, lBackZ);
+          lBackX *= invMag;
+          lBackY *= invMag;
+          lBackZ *= invMag;
+  
+          // ...and the Up vector
+          invMag = inverseMagnitude(lUpX, lUpY, lUpZ);
+          lUpX *= invMag;
+          lUpY *= invMag;
+          lUpZ *= invMag;
+  
+          // Calculate the Right vector as the cross product of the Up and Back vectors
+          var lRightX = (lUpY * lBackZ - lUpZ * lBackY);
+          var lRightY = (lUpZ * lBackX - lUpX * lBackZ);
+          var lRightZ = (lUpX * lBackY - lUpY * lBackX);
+  
+          // Back and Up might not be exactly perpendicular, so the cross product also needs normalization
+          invMag = inverseMagnitude(lRightX, lRightY, lRightZ);
+          lRightX *= invMag;
+          lRightY *= invMag;
+          lRightZ *= invMag;
+  
+          // Recompute Up from the now orthonormal Right and Back vectors so we have a fully orthonormal basis
+          lUpX = (lBackY * lRightZ - lBackZ * lRightY);
+          lUpY = (lBackZ * lRightX - lBackX * lRightZ);
+          lUpZ = (lBackX * lRightY - lBackY * lRightX);
+  
+          var oldX = dirX;
+          var oldY = dirY;
+          var oldZ = dirZ;
+  
+          // Use our 3 vectors to apply a change-of-basis matrix to the source direction
+          dirX = oldX * lRightX + oldY * lUpX + oldZ * lBackX;
+          dirY = oldX * lRightY + oldY * lUpY + oldZ * lBackY;
+          dirZ = oldX * lRightZ + oldY * lUpZ + oldZ * lBackZ;
+  
+          oldX = posX;
+          oldY = posY;
+          oldZ = posZ;
+  
+          // ...and to the source position
+          posX = oldX * lRightX + oldY * lUpX + oldZ * lBackX;
+          posY = oldX * lRightY + oldY * lUpY + oldZ * lBackY;
+          posZ = oldX * lRightZ + oldY * lUpZ + oldZ * lBackZ;
+  
+          // The change-of-basis corrects the orientation, but the origin is still the listener.
+          // Translate the source position by the listener position to finish.
+          posX += lPosX;
+          posY += lPosY;
+          posZ += lPosZ;
+        }
+  
+        if (panner.positionX) {
+          // Assigning to panner.positionX/Y/Z unnecessarily seems to cause performance issues
+          // See https://github.com/emscripten-core/emscripten/issues/15847
+  
+          if (posX != panner.positionX.value) panner.positionX.value = posX;
+          if (posY != panner.positionY.value) panner.positionY.value = posY;
+          if (posZ != panner.positionZ.value) panner.positionZ.value = posZ;
+        } else {
+          panner.setPosition(posX, posY, posZ);
+        }
+        if (panner.orientationX) {
+          // Assigning to panner.orientation/Y/Z unnecessarily seems to cause performance issues
+          // See https://github.com/emscripten-core/emscripten/issues/15847
+  
+          if (dirX != panner.orientationX.value) panner.orientationX.value = dirX;
+          if (dirY != panner.orientationY.value) panner.orientationY.value = dirY;
+          if (dirZ != panner.orientationZ.value) panner.orientationZ.value = dirZ;
+        } else {
+          panner.setOrientation(dirX, dirY, dirZ);
+        }
+  
+        var oldShift = src.dopplerShift;
+        var velX = src.velocity[0];
+        var velY = src.velocity[1];
+        var velZ = src.velocity[2];
+        var lVelX = listener.velocity[0];
+        var lVelY = listener.velocity[1];
+        var lVelZ = listener.velocity[2];
+        if (posX === lPosX && posY === lPosY && posZ === lPosZ
+          || velX === lVelX && velY === lVelY && velZ === lVelZ)
+        {
+          src.dopplerShift = 1.0;
+        } else {
+          // Doppler algorithm from 1.1 spec
+          var speedOfSound = src.context.speedOfSound;
+          var dopplerFactor = src.context.dopplerFactor;
+  
+          var slX = lPosX - posX;
+          var slY = lPosY - posY;
+          var slZ = lPosZ - posZ;
+  
+          var magSl = Math.sqrt(slX * slX + slY * slY + slZ * slZ);
+          var vls = (slX * lVelX + slY * lVelY + slZ * lVelZ) / magSl;
+          var vss = (slX * velX + slY * velY + slZ * velZ) / magSl;
+  
+          vls = Math.min(vls, speedOfSound / dopplerFactor);
+          vss = Math.min(vss, speedOfSound / dopplerFactor);
+  
+          src.dopplerShift = (speedOfSound - dopplerFactor * vls) / (speedOfSound - dopplerFactor * vss);
+        }
+        if (src.dopplerShift !== oldShift) {
+          AL.updateSourceRate(src);
+        }
+      },updateSourceRate:function(src) {
+        if (src.state === 0x1012 /* AL_PLAYING */) {
+          // clear scheduled buffers
+          AL.cancelPendingSourceAudio(src);
+  
+          var audioSrc = src.audioQueue[0];
+          if (!audioSrc) {
+            return; // It is possible that AL.scheduleContextAudio() has not yet fed the next buffer, if so, skip.
+          }
+  
+          var duration;
+          if (src.type === 0x1028 /* AL_STATIC */ && src.looping) {
+            duration = Number.POSITIVE_INFINITY;
+          } else {
+            // audioSrc._duration is expressed after factoring in playbackRate, so when changing playback rate, need
+            // to recompute/rescale the rate to the new playback speed.
+            duration = (audioSrc.buffer.duration - audioSrc._startOffset) / src.playbackRate;
+          }
+  
+          audioSrc._duration = duration;
+          audioSrc.playbackRate.value = src.playbackRate;
+  
+          // reschedule buffers with the new playbackRate
+          AL.scheduleSourceAudio(src);
+        }
+      },sourceDuration:function(src) {
+        var length = 0.0;
+        for (var i = 0; i < src.bufQueue.length; i++) {
+          var audioBuf = src.bufQueue[i].audioBuf;
+          length += audioBuf ? audioBuf.duration : 0.0;
+        }
+        return length;
+      },sourceTell:function(src) {
+        AL.updateSourceTime(src);
+  
+        var offset = 0.0;
+        for (var i = 0; i < src.bufsProcessed; i++) {
+          if (src.bufQueue[i].audioBuf) {
+            offset += src.bufQueue[i].audioBuf.duration;
+          }
+        }
+        offset += src.bufOffset;
+  
+        return offset;
+      },sourceSeek:function(src, offset) {
+        var playing = src.state == 0x1012 /* AL_PLAYING */;
+        if (playing) {
+          AL.setSourceState(src, 0x1011 /* AL_INITIAL */);
+        }
+  
+        if (src.bufQueue[src.bufsProcessed].audioBuf !== null) {
+          src.bufsProcessed = 0;
+          while (offset > src.bufQueue[src.bufsProcessed].audioBuf.duration) {
+            offset -= src.bufQueue[src.bufsProcessed].audiobuf.duration;
+            src.bufsProcessed++;
+          }
+  
+          src.bufOffset = offset;
+        }
+  
+        if (playing) {
+          AL.setSourceState(src, 0x1012 /* AL_PLAYING */);
+        }
+      },getGlobalParam:function(funcname, param) {
+        if (!AL.currentCtx) {
+          return null;
+        }
+  
+        switch (param) {
+        case 0xC000 /* AL_DOPPLER_FACTOR */:
+          return AL.currentCtx.dopplerFactor;
+        case 0xC003 /* AL_SPEED_OF_SOUND */:
+          return AL.currentCtx.speedOfSound;
+        case 0xD000 /* AL_DISTANCE_MODEL */:
+          return AL.currentCtx.distanceModel;
+        default:
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return null;
+        }
+      },setGlobalParam:function(funcname, param, value) {
+        if (!AL.currentCtx) {
+          return;
+        }
+  
+        switch (param) {
+        case 0xC000 /* AL_DOPPLER_FACTOR */:
+          if (!Number.isFinite(value) || value < 0.0) { // Strictly negative values are disallowed
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          AL.currentCtx.dopplerFactor = value;
+          AL.updateListenerSpace(AL.currentCtx);
+          break;
+        case 0xC003 /* AL_SPEED_OF_SOUND */:
+          if (!Number.isFinite(value) || value <= 0.0) { // Negative or zero values are disallowed
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          AL.currentCtx.speedOfSound = value;
+          AL.updateListenerSpace(AL.currentCtx);
+          break;
+        case 0xD000 /* AL_DISTANCE_MODEL */:
+          switch (value) {
+          case 0 /* AL_NONE */:
+          case 0xd001 /* AL_INVERSE_DISTANCE */:
+          case 0xd002 /* AL_INVERSE_DISTANCE_CLAMPED */:
+          case 0xd003 /* AL_LINEAR_DISTANCE */:
+          case 0xd004 /* AL_LINEAR_DISTANCE_CLAMPED */:
+          case 0xd005 /* AL_EXPONENT_DISTANCE */:
+          case 0xd006 /* AL_EXPONENT_DISTANCE_CLAMPED */:
+            AL.currentCtx.distanceModel = value;
+            AL.updateContextGlobal(AL.currentCtx);
+            break;
+          default:
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          break;
+        default:
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return;
+        }
+      },getListenerParam:function(funcname, param) {
+        if (!AL.currentCtx) {
+          return null;
+        }
+  
+        switch (param) {
+        case 0x1004 /* AL_POSITION */:
+          return AL.currentCtx.listener.position;
+        case 0x1006 /* AL_VELOCITY */:
+          return AL.currentCtx.listener.velocity;
+        case 0x100F /* AL_ORIENTATION */:
+          return AL.currentCtx.listener.direction.concat(AL.currentCtx.listener.up);
+        case 0x100A /* AL_GAIN */:
+          return AL.currentCtx.gain.gain.value;
+        default:
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return null;
+        }
+      },setListenerParam:function(funcname, param, value) {
+        if (!AL.currentCtx) {
+          return;
+        }
+        if (value === null) {
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return;
+        }
+  
+        var listener = AL.currentCtx.listener;
+        switch (param) {
+        case 0x1004 /* AL_POSITION */:
+          if (!Number.isFinite(value[0]) || !Number.isFinite(value[1]) || !Number.isFinite(value[2])) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          listener.position[0] = value[0];
+          listener.position[1] = value[1];
+          listener.position[2] = value[2];
+          AL.updateListenerSpace(AL.currentCtx);
+          break;
+        case 0x1006 /* AL_VELOCITY */:
+          if (!Number.isFinite(value[0]) || !Number.isFinite(value[1]) || !Number.isFinite(value[2])) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          listener.velocity[0] = value[0];
+          listener.velocity[1] = value[1];
+          listener.velocity[2] = value[2];
+          AL.updateListenerSpace(AL.currentCtx);
+          break;
+        case 0x100A /* AL_GAIN */:
+          if (!Number.isFinite(value) || value < 0.0) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          AL.currentCtx.gain.gain.value = value;
+          break;
+        case 0x100F /* AL_ORIENTATION */:
+          if (!Number.isFinite(value[0]) || !Number.isFinite(value[1]) || !Number.isFinite(value[2])
+            || !Number.isFinite(value[3]) || !Number.isFinite(value[4]) || !Number.isFinite(value[5])
+          ) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          listener.direction[0] = value[0];
+          listener.direction[1] = value[1];
+          listener.direction[2] = value[2];
+          listener.up[0] = value[3];
+          listener.up[1] = value[4];
+          listener.up[2] = value[5];
+          AL.updateListenerSpace(AL.currentCtx);
+          break;
+        default:
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return;
+        }
+      },getBufferParam:function(funcname, bufferId, param) {
+        if (!AL.currentCtx) {
+          return;
+        }
+        var buf = AL.buffers[bufferId];
+        if (!buf || bufferId === 0) {
+          AL.currentCtx.err = 0xA001 /* AL_INVALID_NAME */;
+          return;
+        }
+  
+        switch (param) {
+        case 0x2001 /* AL_FREQUENCY */:
+          return buf.frequency;
+        case 0x2002 /* AL_BITS */:
+          return buf.bytesPerSample * 8;
+        case 0x2003 /* AL_CHANNELS */:
+          return buf.channels;
+        case 0x2004 /* AL_SIZE */:
+          return buf.length * buf.bytesPerSample * buf.channels;
+        case 0x2015 /* AL_LOOP_POINTS_SOFT */:
+          if (buf.length === 0) {
+            return [0, 0];
+          } else {
+            return [
+              (buf.audioBuf._loopStart || 0.0) * buf.frequency,
+              (buf.audioBuf._loopEnd || buf.length) * buf.frequency
+            ];
+          }
+        default:
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return null;
+        }
+      },setBufferParam:function(funcname, bufferId, param, value) {
+        if (!AL.currentCtx) {
+          return;
+        }
+        var buf = AL.buffers[bufferId];
+        if (!buf || bufferId === 0) {
+          AL.currentCtx.err = 0xA001 /* AL_INVALID_NAME */;
+          return;
+        }
+        if (value === null) {
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return;
+        }
+  
+        switch (param) {
+        case 0x2004 /* AL_SIZE */:
+          if (value !== 0) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          // Per the spec, setting AL_SIZE to 0 is a legal NOP.
+          break;
+        case 0x2015 /* AL_LOOP_POINTS_SOFT */:
+          if (value[0] < 0 || value[0] > buf.length || value[1] < 0 || value[1] > buf.Length || value[0] >= value[1]) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          if (buf.refCount > 0) {
+            AL.currentCtx.err = 0xA004 /* AL_INVALID_OPERATION */;
+            return;
+          }
+  
+          if (buf.audioBuf) {
+            buf.audioBuf._loopStart = value[0] / buf.frequency;
+            buf.audioBuf._loopEnd = value[1] / buf.frequency;
+          }
+          break;
+        default:
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return;
+        }
+      },getSourceParam:function(funcname, sourceId, param) {
+        if (!AL.currentCtx) {
+          return null;
+        }
+        var src = AL.currentCtx.sources[sourceId];
+        if (!src) {
+          AL.currentCtx.err = 0xA001 /* AL_INVALID_NAME */;
+          return null;
+        }
+  
+        switch (param) {
+        case 0x202 /* AL_SOURCE_RELATIVE */:
+          return src.relative;
+        case 0x1001 /* AL_CONE_INNER_ANGLE */:
+          return src.coneInnerAngle;
+        case 0x1002 /* AL_CONE_OUTER_ANGLE */:
+          return src.coneOuterAngle;
+        case 0x1003 /* AL_PITCH */:
+          return src.pitch;
+        case 0x1004 /* AL_POSITION */:
+          return src.position;
+        case 0x1005 /* AL_DIRECTION */:
+          return src.direction;
+        case 0x1006 /* AL_VELOCITY */:
+          return src.velocity;
+        case 0x1007 /* AL_LOOPING */:
+          return src.looping;
+        case 0x1009 /* AL_BUFFER */:
+          if (src.type === 0x1028 /* AL_STATIC */) {
+            return src.bufQueue[0].id;
+          } else {
+            return 0;
+          }
+        case 0x100A /* AL_GAIN */:
+          return src.gain.gain.value;
+         case 0x100D /* AL_MIN_GAIN */:
+          return src.minGain;
+        case 0x100E /* AL_MAX_GAIN */:
+          return src.maxGain;
+        case 0x1010 /* AL_SOURCE_STATE */:
+          return src.state;
+        case 0x1015 /* AL_BUFFERS_QUEUED */:
+          if (src.bufQueue.length === 1 && src.bufQueue[0].id === 0) {
+            return 0;
+          } else {
+            return src.bufQueue.length;
+          }
+        case 0x1016 /* AL_BUFFERS_PROCESSED */:
+          if ((src.bufQueue.length === 1 && src.bufQueue[0].id === 0) || src.looping) {
+            return 0;
+          } else {
+            return src.bufsProcessed;
+          }
+        case 0x1020 /* AL_REFERENCE_DISTANCE */:
+          return src.refDistance;
+        case 0x1021 /* AL_ROLLOFF_FACTOR */:
+          return src.rolloffFactor;
+        case 0x1022 /* AL_CONE_OUTER_GAIN */:
+          return src.coneOuterGain;
+        case 0x1023 /* AL_MAX_DISTANCE */:
+          return src.maxDistance;
+        case 0x1024 /* AL_SEC_OFFSET */:
+          return AL.sourceTell(src);
+        case 0x1025 /* AL_SAMPLE_OFFSET */:
+          var offset = AL.sourceTell(src);
+          if (offset > 0.0) {
+            offset *= src.bufQueue[0].frequency;
+          }
+          return offset;
+        case 0x1026 /* AL_BYTE_OFFSET */:
+          var offset = AL.sourceTell(src);
+          if (offset > 0.0) {
+            offset *= src.bufQueue[0].frequency * src.bufQueue[0].bytesPerSample;
+          }
+          return offset;
+        case 0x1027 /* AL_SOURCE_TYPE */:
+          return src.type;
+        case 0x1214 /* AL_SOURCE_SPATIALIZE_SOFT */:
+          return src.spatialize;
+        case 0x2009 /* AL_BYTE_LENGTH_SOFT */: 
+          var length = 0;
+          var bytesPerFrame = 0;
+          for (var i = 0; i < src.bufQueue.length; i++) {
+            length += src.bufQueue[i].length;
+            if (src.bufQueue[i].id !== 0) {
+              bytesPerFrame = src.bufQueue[i].bytesPerSample * src.bufQueue[i].channels;
+            }
+          }
+          return length * bytesPerFrame;
+        case 0x200A /* AL_SAMPLE_LENGTH_SOFT */:
+          var length = 0;
+          for (var i = 0; i < src.bufQueue.length; i++) {
+            length += src.bufQueue[i].length;
+          }
+          return length;
+        case 0x200B /* AL_SEC_LENGTH_SOFT */:
+          return AL.sourceDuration(src);
+        case 0xD000 /* AL_DISTANCE_MODEL */:
+          return src.distanceModel;
+        default:
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return null;
+        }
+      },setSourceParam:function(funcname, sourceId, param, value) {
+        if (!AL.currentCtx) {
+          return;
+        }
+        var src = AL.currentCtx.sources[sourceId];
+        if (!src) {
+          AL.currentCtx.err = 0xA001 /* AL_INVALID_NAME */;
+          return;
+        }
+        if (value === null) {
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return;
+        }
+  
+        switch (param) {
+        case 0x202 /* AL_SOURCE_RELATIVE */:
+          if (value === 1 /* AL_TRUE */) {
+            src.relative = true;
+            AL.updateSourceSpace(src);
+          } else if (value === 0 /* AL_FALSE */) {
+            src.relative = false;
+            AL.updateSourceSpace(src);
+          } else {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          break;
+        case 0x1001 /* AL_CONE_INNER_ANGLE */:
+          if (!Number.isFinite(value)) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          src.coneInnerAngle = value;
+          if (src.panner) {
+            src.panner.coneInnerAngle = value % 360.0;
+          }
+          break;
+        case 0x1002 /* AL_CONE_OUTER_ANGLE */:
+          if (!Number.isFinite(value)) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          src.coneOuterAngle = value;
+          if (src.panner) {
+            src.panner.coneOuterAngle = value % 360.0;
+          }
+          break;
+        case 0x1003 /* AL_PITCH */:
+          if (!Number.isFinite(value) || value <= 0.0) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          if (src.pitch === value) {
+            break;
+          }
+  
+          src.pitch = value;
+          AL.updateSourceRate(src);
+          break;
+        case 0x1004 /* AL_POSITION */:
+          if (!Number.isFinite(value[0]) || !Number.isFinite(value[1]) || !Number.isFinite(value[2])) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          src.position[0] = value[0];
+          src.position[1] = value[1];
+          src.position[2] = value[2];
+          AL.updateSourceSpace(src);
+          break;
+        case 0x1005 /* AL_DIRECTION */:
+          if (!Number.isFinite(value[0]) || !Number.isFinite(value[1]) || !Number.isFinite(value[2])) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          src.direction[0] = value[0];
+          src.direction[1] = value[1];
+          src.direction[2] = value[2];
+          AL.updateSourceSpace(src);
+          break;
+        case 0x1006 /* AL_VELOCITY */:
+          if (!Number.isFinite(value[0]) || !Number.isFinite(value[1]) || !Number.isFinite(value[2])) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          src.velocity[0] = value[0];
+          src.velocity[1] = value[1];
+          src.velocity[2] = value[2];
+          AL.updateSourceSpace(src);
+          break;
+        case 0x1007 /* AL_LOOPING */:
+          if (value === 1 /* AL_TRUE */) {
+            src.looping = true;
+            AL.updateSourceTime(src);
+            if (src.type === 0x1028 /* AL_STATIC */ && src.audioQueue.length > 0) {
+              var audioSrc  = src.audioQueue[0];
+              audioSrc.loop = true;
+              audioSrc._duration = Number.POSITIVE_INFINITY;
+            }
+          } else if (value === 0 /* AL_FALSE */) {
+            src.looping = false;
+            var currentTime = AL.updateSourceTime(src);
+            if (src.type === 0x1028 /* AL_STATIC */ && src.audioQueue.length > 0) {
+              var audioSrc  = src.audioQueue[0];
+              audioSrc.loop = false;
+              audioSrc._duration = src.bufQueue[0].audioBuf.duration / src.playbackRate;
+              audioSrc._startTime = currentTime - src.bufOffset / src.playbackRate;
+            }
+          } else {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          break;
+        case 0x1009 /* AL_BUFFER */:
+          if (src.state === 0x1012 /* AL_PLAYING */ || src.state === 0x1013 /* AL_PAUSED */) {
+            AL.currentCtx.err = 0xA004 /* AL_INVALID_OPERATION */;
+            return;
+          }
+  
+          if (value === 0) {
+            for (var i in src.bufQueue) {
+              src.bufQueue[i].refCount--;
+            }
+            src.bufQueue.length = 1;
+            src.bufQueue[0] = AL.buffers[0];
+  
+            src.bufsProcessed = 0;
+            src.type = 0x1030 /* AL_UNDETERMINED */;
+          } else {
+            var buf = AL.buffers[value];
+            if (!buf) {
+              AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+              return;
+            }
+  
+            for (var i in src.bufQueue) {
+              src.bufQueue[i].refCount--;
+            }
+            src.bufQueue.length = 0;
+  
+            buf.refCount++;
+            src.bufQueue = [buf];
+            src.bufsProcessed = 0;
+            src.type = 0x1028 /* AL_STATIC */;
+          }
+  
+          AL.initSourcePanner(src);
+          AL.scheduleSourceAudio(src);
+          break;
+        case 0x100A /* AL_GAIN */:
+          if (!Number.isFinite(value) || value < 0.0) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          src.gain.gain.value = value;
+          break;
+        case 0x100D /* AL_MIN_GAIN */:
+          if (!Number.isFinite(value) || value < 0.0 || value > Math.min(src.maxGain, 1.0)) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          src.minGain = value;
+          break;
+        case 0x100E /* AL_MAX_GAIN */:
+          if (!Number.isFinite(value) || value < Math.max(0.0, src.minGain) || value > 1.0) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          src.maxGain = value;
+          break;
+        case 0x1020 /* AL_REFERENCE_DISTANCE */:
+          if (!Number.isFinite(value) || value < 0.0) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          src.refDistance = value;
+          if (src.panner) {
+            src.panner.refDistance = value;
+          }
+          break;
+        case 0x1021 /* AL_ROLLOFF_FACTOR */:
+          if (!Number.isFinite(value) || value < 0.0) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          src.rolloffFactor = value;
+          if (src.panner) {
+            src.panner.rolloffFactor = value;
+          }
+          break;
+        case 0x1022 /* AL_CONE_OUTER_GAIN */:
+          if (!Number.isFinite(value) || value < 0.0 || value > 1.0) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          src.coneOuterGain = value;
+          if (src.panner) {
+            src.panner.coneOuterGain = value;
+          }
+          break;
+        case 0x1023 /* AL_MAX_DISTANCE */:
+          if (!Number.isFinite(value) || value < 0.0) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          src.maxDistance = value;
+          if (src.panner) {
+            src.panner.maxDistance = value;
+          }
+          break;
+        case 0x1024 /* AL_SEC_OFFSET */:
+          if (value < 0.0 || value > AL.sourceDuration(src)) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          AL.sourceSeek(src, value);
+          break;
+        case 0x1025 /* AL_SAMPLE_OFFSET */:
+          var srcLen = AL.sourceDuration(src);
+          if (srcLen > 0.0) {
+            var frequency;
+            for (var bufId in src.bufQueue) {
+              if (bufId) {
+                frequency = src.bufQueue[bufId].frequency;
+                break;
+              }
+            }
+            value /= frequency;
+          }
+          if (value < 0.0 || value > srcLen) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          AL.sourceSeek(src, value);
+          break;
+        case 0x1026 /* AL_BYTE_OFFSET */:
+          var srcLen = AL.sourceDuration(src);
+          if (srcLen > 0.0) {
+            var bytesPerSec;
+            for (var bufId in src.bufQueue) {
+              if (bufId) {
+                var buf = src.bufQueue[bufId];
+                bytesPerSec = buf.frequency * buf.bytesPerSample * buf.channels;
+                break;
+              }
+            }
+            value /= bytesPerSec;
+          }
+          if (value < 0.0 || value > srcLen) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          AL.sourceSeek(src, value);
+          break;
+        case 0x1214 /* AL_SOURCE_SPATIALIZE_SOFT */:
+          if (value !== 0 /* AL_FALSE */ && value !== 1 /* AL_TRUE */ && value !== 2 /* AL_AUTO_SOFT */) {
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+  
+          src.spatialize = value;
+          AL.initSourcePanner(src);
+          break;
+        case 0x2009 /* AL_BYTE_LENGTH_SOFT */: 
+        case 0x200A /* AL_SAMPLE_LENGTH_SOFT */:
+        case 0x200B /* AL_SEC_LENGTH_SOFT */:
+          AL.currentCtx.err = 0xA004 /* AL_INVALID_OPERATION */;
+          break;
+        case 0xD000 /* AL_DISTANCE_MODEL */:
+          switch (value) {
+          case 0 /* AL_NONE */:
+          case 0xd001 /* AL_INVERSE_DISTANCE */:
+          case 0xd002 /* AL_INVERSE_DISTANCE_CLAMPED */:
+          case 0xd003 /* AL_LINEAR_DISTANCE */:
+          case 0xd004 /* AL_LINEAR_DISTANCE_CLAMPED */:
+          case 0xd005 /* AL_EXPONENT_DISTANCE */:
+          case 0xd006 /* AL_EXPONENT_DISTANCE_CLAMPED */:
+            src.distanceModel = value;
+            if (AL.currentCtx.sourceDistanceModel) {
+              AL.updateContextGlobal(AL.currentCtx);
+            }
+            break;
+          default:
+            AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+            return;
+          }
+          break;
+        default:
+          AL.currentCtx.err = 0xA002 /* AL_INVALID_ENUM */;
+          return;
+        }
+      },captures:{},sharedCaptureAudioCtx:null,requireValidCaptureDevice:function(deviceId, funcname) {
+        if (deviceId === 0) {
+          AL.alcErr = 0xA001 /* ALC_INVALID_DEVICE */;
+          return null;
+        }
+        var c = AL.captures[deviceId];
+        if (!c) {
+          AL.alcErr = 0xA001 /* ALC_INVALID_DEVICE */;
+          return null;
+        }
+        var err = c.mediaStreamError;
+        if (err) {
+          AL.alcErr = 0xA001 /* ALC_INVALID_DEVICE */;
+          return null;
+        }
+        return c;
+      }};
+  function _alBufferData(bufferId, format, pData, size, freq) {
+      if (!AL.currentCtx) {
+        return;
+      }
+      var buf = AL.buffers[bufferId];
+      if (!buf) {
+        AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+        return;
+      }
+      if (freq <= 0) {
+        AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+        return;
       }
   
-      if (!noSetTiming) {
-        if (fps && fps > 0) _emscripten_set_main_loop_timing(0/*EM_TIMING_SETTIMEOUT*/, 1000.0 / fps);
-        else _emscripten_set_main_loop_timing(1/*EM_TIMING_RAF*/, 1); // Do rAF by rendering each frame (no decimating)
-  
-        Browser.mainLoop.scheduler();
-      }
-  
-      if (simulateInfiniteLoop) {
-        throw 'unwind';
+      var audioBuf = null;
+      try {
+        switch (format) {
+        case 0x1100 /* AL_FORMAT_MONO8 */:
+          if (size > 0) {
+            audioBuf = AL.currentCtx.audioCtx.createBuffer(1, size, freq);
+            var channel0 = audioBuf.getChannelData(0);
+            for (var i = 0; i < size; ++i) {
+              channel0[i] = HEAPU8[pData++] * 0.0078125 /* 1/128 */ - 1.0;
+            }
+          }
+          buf.bytesPerSample = 1;
+          buf.channels = 1;
+          buf.length = size;
+          break;
+        case 0x1101 /* AL_FORMAT_MONO16 */:
+          if (size > 0) {
+            audioBuf = AL.currentCtx.audioCtx.createBuffer(1, size >> 1, freq);
+            var channel0 = audioBuf.getChannelData(0);
+            pData >>= 1;
+            for (var i = 0; i < size >> 1; ++i) {
+              channel0[i] = HEAP16[pData++] * 0.000030517578125 /* 1/32768 */;
+            }
+          }
+          buf.bytesPerSample = 2;
+          buf.channels = 1;
+          buf.length = size >> 1;
+          break;
+        case 0x1102 /* AL_FORMAT_STEREO8 */:
+          if (size > 0) {
+            audioBuf = AL.currentCtx.audioCtx.createBuffer(2, size >> 1, freq);
+            var channel0 = audioBuf.getChannelData(0);
+            var channel1 = audioBuf.getChannelData(1);
+            for (var i = 0; i < size >> 1; ++i) {
+              channel0[i] = HEAPU8[pData++] * 0.0078125 /* 1/128 */ - 1.0;
+              channel1[i] = HEAPU8[pData++] * 0.0078125 /* 1/128 */ - 1.0;
+            }
+          }
+          buf.bytesPerSample = 1;
+          buf.channels = 2;
+          buf.length = size >> 1;
+          break;
+        case 0x1103 /* AL_FORMAT_STEREO16 */:
+          if (size > 0) {
+            audioBuf = AL.currentCtx.audioCtx.createBuffer(2, size >> 2, freq);
+            var channel0 = audioBuf.getChannelData(0);
+            var channel1 = audioBuf.getChannelData(1);
+            pData >>= 1;
+            for (var i = 0; i < size >> 2; ++i) {
+              channel0[i] = HEAP16[pData++] * 0.000030517578125 /* 1/32768 */;
+              channel1[i] = HEAP16[pData++] * 0.000030517578125 /* 1/32768 */;
+            }
+          }
+          buf.bytesPerSample = 2;
+          buf.channels = 2;
+          buf.length = size >> 2;
+          break;
+        case 0x10010 /* AL_FORMAT_MONO_FLOAT32 */:
+          if (size > 0) {
+            audioBuf = AL.currentCtx.audioCtx.createBuffer(1, size >> 2, freq);
+            var channel0 = audioBuf.getChannelData(0);
+            pData >>= 2;
+            for (var i = 0; i < size >> 2; ++i) {
+              channel0[i] = HEAPF32[pData++];
+            }
+          }
+          buf.bytesPerSample = 4;
+          buf.channels = 1;
+          buf.length = size >> 2;
+          break;
+        case 0x10011 /* AL_FORMAT_STEREO_FLOAT32 */:
+          if (size > 0) {
+            audioBuf = AL.currentCtx.audioCtx.createBuffer(2, size >> 3, freq);
+            var channel0 = audioBuf.getChannelData(0);
+            var channel1 = audioBuf.getChannelData(1);
+            pData >>= 2;
+            for (var i = 0; i < size >> 3; ++i) {
+              channel0[i] = HEAPF32[pData++];
+              channel1[i] = HEAPF32[pData++];
+            }
+          }
+          buf.bytesPerSample = 4;
+          buf.channels = 2;
+          buf.length = size >> 3;
+          break;
+        default:
+          AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+          return;
+        }
+        buf.frequency = freq;
+        buf.audioBuf = audioBuf;
+      } catch (e) {
+        AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+        return;
       }
     }
+
+  function _alDeleteBuffers(count, pBufferIds) {
+      if (!AL.currentCtx) {
+        return;
+      }
+  
+      for (var i = 0; i < count; ++i) {
+        var bufId = HEAP32[(((pBufferIds)+(i*4))>>2)];
+        /// Deleting the zero buffer is a legal NOP, so ignore it
+        if (bufId === 0) {
+          continue;
+        }
+  
+        // Make sure the buffer index is valid.
+        if (!AL.buffers[bufId]) {
+          AL.currentCtx.err = 0xA001 /* AL_INVALID_NAME */;
+          return;
+        }
+  
+        // Make sure the buffer is no longer in use.
+        if (AL.buffers[bufId].refCount) {
+          AL.currentCtx.err = 0xA004 /* AL_INVALID_OPERATION */;
+          return;
+        }
+      }
+  
+      for (var i = 0; i < count; ++i) {
+        var bufId = HEAP32[(((pBufferIds)+(i*4))>>2)];
+        if (bufId === 0) {
+          continue;
+        }
+  
+        AL.deviceRefCounts[AL.buffers[bufId].deviceId]--;
+        delete AL.buffers[bufId];
+        AL.freeIds.push(bufId);
+      }
+    }
+
+  function _alSourcei(sourceId, param, value) {
+      switch (param) {
+      case 0x202 /* AL_SOURCE_RELATIVE */:
+      case 0x1001 /* AL_CONE_INNER_ANGLE */:
+      case 0x1002 /* AL_CONE_OUTER_ANGLE */:
+      case 0x1007 /* AL_LOOPING */:
+      case 0x1009 /* AL_BUFFER */:
+      case 0x1020 /* AL_REFERENCE_DISTANCE */:
+      case 0x1021 /* AL_ROLLOFF_FACTOR */:
+      case 0x1023 /* AL_MAX_DISTANCE */:
+      case 0x1024 /* AL_SEC_OFFSET */:
+      case 0x1025 /* AL_SAMPLE_OFFSET */:
+      case 0x1026 /* AL_BYTE_OFFSET */:
+      case 0x1214 /* AL_SOURCE_SPATIALIZE_SOFT */:
+      case 0x2009 /* AL_BYTE_LENGTH_SOFT */: 
+      case 0x200A /* AL_SAMPLE_LENGTH_SOFT */:
+      case 0xD000 /* AL_DISTANCE_MODEL */:
+        AL.setSourceParam('alSourcei', sourceId, param, value);
+        break;
+      default:
+        AL.setSourceParam('alSourcei', sourceId, param, null);
+        break;
+      }
+    }
+  function _alDeleteSources(count, pSourceIds) {
+      if (!AL.currentCtx) {
+        return;
+      }
+  
+      for (var i = 0; i < count; ++i) {
+        var srcId = HEAP32[(((pSourceIds)+(i*4))>>2)];
+        if (!AL.currentCtx.sources[srcId]) {
+          AL.currentCtx.err = 0xA001 /* AL_INVALID_NAME */;
+          return;
+        }
+      }
+  
+      for (var i = 0; i < count; ++i) {
+        var srcId = HEAP32[(((pSourceIds)+(i*4))>>2)];
+        AL.setSourceState(AL.currentCtx.sources[srcId], 0x1014 /* AL_STOPPED */);
+        _alSourcei(srcId, 0x1009 /* AL_BUFFER */, 0);
+        delete AL.currentCtx.sources[srcId];
+        AL.freeIds.push(srcId);
+      }
+    }
+
+  function _alGenBuffers(count, pBufferIds) {
+      if (!AL.currentCtx) {
+        return;
+      }
+  
+      for (var i = 0; i < count; ++i) {
+        var buf = {
+          deviceId: AL.currentCtx.deviceId,
+          id: AL.newId(),
+          refCount: 0,
+          audioBuf: null,
+          frequency: 0,
+          bytesPerSample: 2,
+          channels: 1,
+          length: 0,
+        };
+        AL.deviceRefCounts[buf.deviceId]++;
+        AL.buffers[buf.id] = buf;
+        HEAP32[(((pBufferIds)+(i*4))>>2)] = buf.id;
+      }
+    }
+
+  function _alGenSources(count, pSourceIds) {
+      if (!AL.currentCtx) {
+        return;
+      }
+      for (var i = 0; i < count; ++i) {
+        var gain = AL.currentCtx.audioCtx.createGain();
+        gain.connect(AL.currentCtx.gain);
+        var src = {
+          context: AL.currentCtx,
+          id: AL.newId(),
+          type: 0x1030 /* AL_UNDETERMINED */,
+          state: 0x1011 /* AL_INITIAL */,
+          bufQueue: [AL.buffers[0]],
+          audioQueue: [],
+          looping: false,
+          pitch: 1.0,
+          dopplerShift: 1.0,
+          gain: gain,
+          minGain: 0.0,
+          maxGain: 1.0,
+          panner: null,
+          bufsProcessed: 0,
+          bufStartTime: Number.NEGATIVE_INFINITY,
+          bufOffset: 0.0,
+          relative: false,
+          refDistance: 1.0,
+          maxDistance: 3.40282e38 /* FLT_MAX */,
+          rolloffFactor: 1.0,
+          position: [0.0, 0.0, 0.0],
+          velocity: [0.0, 0.0, 0.0],
+          direction: [0.0, 0.0, 0.0],
+          coneOuterGain: 0.0,
+          coneInnerAngle: 360.0,
+          coneOuterAngle: 360.0,
+          distanceModel: 0xd002 /* AL_INVERSE_DISTANCE_CLAMPED */,
+          spatialize: 2 /* AL_AUTO_SOFT */,
+  
+          get playbackRate() {
+            return this.pitch * this.dopplerShift;
+          }
+        };
+        AL.currentCtx.sources[src.id] = src;
+        HEAP32[(((pSourceIds)+(i*4))>>2)] = src.id;
+      }
+    }
+
+  function _alGetError() {
+      if (!AL.currentCtx) {
+        return 0xA004 /* AL_INVALID_OPERATION */;
+      } else {
+        // Reset error on get.
+        var err = AL.currentCtx.err;
+        AL.currentCtx.err = 0 /* AL_NO_ERROR */;
+        return err;
+      }
+    }
+
+  function _alIsExtensionPresent(pExtName) {
+      var name = UTF8ToString(pExtName);
+  
+      return AL.AL_EXTENSIONS[name] ? 1 : 0;
+    }
+
+  function _alListenerfv(param, pValues) {
+      if (!AL.currentCtx) {
+        return;
+      }
+      if (!pValues) {
+        AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+        return;
+      }
+  
+      switch (param) {
+      case 0x1004 /* AL_POSITION */:
+      case 0x1006 /* AL_VELOCITY */:
+        AL.paramArray[0] = HEAPF32[((pValues)>>2)];
+        AL.paramArray[1] = HEAPF32[(((pValues)+(4))>>2)];
+        AL.paramArray[2] = HEAPF32[(((pValues)+(8))>>2)];
+        AL.setListenerParam('alListenerfv', param, AL.paramArray);
+        break;
+      case 0x100F /* AL_ORIENTATION */:
+        AL.paramArray[0] = HEAPF32[((pValues)>>2)];
+        AL.paramArray[1] = HEAPF32[(((pValues)+(4))>>2)];
+        AL.paramArray[2] = HEAPF32[(((pValues)+(8))>>2)];
+        AL.paramArray[3] = HEAPF32[(((pValues)+(12))>>2)];
+        AL.paramArray[4] = HEAPF32[(((pValues)+(16))>>2)];
+        AL.paramArray[5] = HEAPF32[(((pValues)+(20))>>2)];
+        AL.setListenerParam('alListenerfv', param, AL.paramArray);
+        break;
+      default:
+        AL.setListenerParam('alListenerfv', param, null);
+        break;
+      }
+    }
+
+  function _alSourcePlay(sourceId) {
+      if (!AL.currentCtx) {
+        return;
+      }
+      var src = AL.currentCtx.sources[sourceId];
+      if (!src) {
+        AL.currentCtx.err = 0xA001 /* AL_INVALID_NAME */;
+        return;
+      }
+      AL.setSourceState(src, 0x1012 /* AL_PLAYING */);
+    }
+
+  function _alSourcef(sourceId, param, value) {
+      switch (param) {
+      case 0x1001 /* AL_CONE_INNER_ANGLE */:
+      case 0x1002 /* AL_CONE_OUTER_ANGLE */:
+      case 0x1003 /* AL_PITCH */:
+      case 0x100A /* AL_GAIN */:
+      case 0x100D /* AL_MIN_GAIN */:
+      case 0x100E /* AL_MAX_GAIN */:
+      case 0x1020 /* AL_REFERENCE_DISTANCE */:
+      case 0x1021 /* AL_ROLLOFF_FACTOR */:
+      case 0x1022 /* AL_CONE_OUTER_GAIN */:
+      case 0x1023 /* AL_MAX_DISTANCE */:
+      case 0x1024 /* AL_SEC_OFFSET */:
+      case 0x1025 /* AL_SAMPLE_OFFSET */:
+      case 0x1026 /* AL_BYTE_OFFSET */:
+      case 0x200B /* AL_SEC_LENGTH_SOFT */:
+        AL.setSourceParam('alSourcef', sourceId, param, value);
+        break;
+      default:
+        AL.setSourceParam('alSourcef', sourceId, param, null);
+        break;
+      }
+    }
+
+  function _alSourcefv(sourceId, param, pValues) {
+      if (!AL.currentCtx) {
+        return;
+      }
+      if (!pValues) {
+        AL.currentCtx.err = 0xA003 /* AL_INVALID_VALUE */;
+        return;
+      }
+  
+      switch (param) {
+      case 0x1001 /* AL_CONE_INNER_ANGLE */:
+      case 0x1002 /* AL_CONE_OUTER_ANGLE */:
+      case 0x1003 /* AL_PITCH */:
+      case 0x100A /* AL_GAIN */:
+      case 0x100D /* AL_MIN_GAIN */:
+      case 0x100E /* AL_MAX_GAIN */:
+      case 0x1020 /* AL_REFERENCE_DISTANCE */:
+      case 0x1021 /* AL_ROLLOFF_FACTOR */:
+      case 0x1022 /* AL_CONE_OUTER_GAIN */:
+      case 0x1023 /* AL_MAX_DISTANCE */:
+      case 0x1024 /* AL_SEC_OFFSET */:
+      case 0x1025 /* AL_SAMPLE_OFFSET */:
+      case 0x1026 /* AL_BYTE_OFFSET */:
+      case 0x200B /* AL_SEC_LENGTH_SOFT */:
+        var val = HEAPF32[((pValues)>>2)];
+        AL.setSourceParam('alSourcefv', sourceId, param, val);
+        break;
+      case 0x1004 /* AL_POSITION */:
+      case 0x1005 /* AL_DIRECTION */:
+      case 0x1006 /* AL_VELOCITY */:
+        AL.paramArray[0] = HEAPF32[((pValues)>>2)];
+        AL.paramArray[1] = HEAPF32[(((pValues)+(4))>>2)];
+        AL.paramArray[2] = HEAPF32[(((pValues)+(8))>>2)];
+        AL.setSourceParam('alSourcefv', sourceId, param, AL.paramArray);
+        break;
+      default:
+        AL.setSourceParam('alSourcefv', sourceId, param, null);
+        break;
+      }
+    }
+
+
+  function listenOnce(object, event, func) {
+      object.addEventListener(event, func, { 'once': true });
+    }
+  /** @param {Object=} elements */
+  function autoResumeAudioContext(ctx, elements) {
+      if (!elements) {
+        elements = [document, document.getElementById('canvas')];
+      }
+      ['keydown', 'mousedown', 'touchstart'].forEach(function(event) {
+        elements.forEach(function(element) {
+          if (element) {
+            listenOnce(element, event, function() {
+              if (ctx.state === 'suspended') ctx.resume();
+            });
+          }
+        });
+      });
+    }
+  function _alcCreateContext(deviceId, pAttrList) {
+      if (!(deviceId in AL.deviceRefCounts)) {
+        AL.alcErr = 0xA001; /* ALC_INVALID_DEVICE */
+        return 0;
+      }
+  
+      var options = null;
+      var attrs = [];
+      var hrtf = null;
+      pAttrList >>= 2;
+      if (pAttrList) {
+        var attr = 0;
+        var val = 0;
+        while (true) {
+          attr = HEAP32[pAttrList++];
+          attrs.push(attr);
+          if (attr === 0) {
+            break;
+          }
+          val = HEAP32[pAttrList++];
+          attrs.push(val);
+  
+          switch (attr) {
+          case 0x1007 /* ALC_FREQUENCY */:
+            if (!options) {
+              options = {};
+            }
+  
+            options.sampleRate = val;
+            break;
+          case 0x1010 /* ALC_MONO_SOURCES */: // fallthrough
+          case 0x1011 /* ALC_STEREO_SOURCES */:
+            // Do nothing; these hints are satisfied by default
+            break
+          case 0x1992 /* ALC_HRTF_SOFT */:
+            switch (val) {
+              case 0 /* ALC_FALSE */:
+                hrtf = false;
+                break;
+              case 1 /* ALC_TRUE */:
+                hrtf = true;
+                break;
+              case 2 /* ALC_DONT_CARE_SOFT */:
+                break;
+              default:
+                AL.alcErr = 0xA004 /* ALC_INVALID_VALUE */;
+                return 0;
+            }
+            break;
+          case 0x1996 /* ALC_HRTF_ID_SOFT */:
+            if (val !== 0) {
+              AL.alcErr = 0xA004 /* ALC_INVALID_VALUE */;
+              return 0;
+            }
+            break;
+          default:
+            AL.alcErr = 0xA004; /* ALC_INVALID_VALUE */
+            return 0;
+          }
+        }
+      }
+  
+      var AudioContext = window.AudioContext || window.webkitAudioContext;
+      var ac = null;
+      try {
+        // Only try to pass options if there are any, for compat with browsers that don't support this
+        if (options) {
+          ac = new AudioContext(options);
+        } else {
+          ac = new AudioContext();
+        }
+      } catch (e) {
+        if (e.name === 'NotSupportedError') {
+          AL.alcErr = 0xA004; /* ALC_INVALID_VALUE */
+        } else {
+          AL.alcErr = 0xA001; /* ALC_INVALID_DEVICE */
+        }
+  
+        return 0;
+      }
+  
+      autoResumeAudioContext(ac);
+  
+      // Old Web Audio API (e.g. Safari 6.0.5) had an inconsistently named createGainNode function.
+      if (typeof ac.createGain == 'undefined') {
+        ac.createGain = ac.createGainNode;
+      }
+  
+      var gain = ac.createGain();
+      gain.connect(ac.destination);
+      var ctx = {
+        deviceId: deviceId,
+        id: AL.newId(),
+        attrs: attrs,
+        audioCtx: ac,
+        listener: {
+      	  position: [0.0, 0.0, 0.0],
+      	  velocity: [0.0, 0.0, 0.0],
+      	  direction: [0.0, 0.0, 0.0],
+      	  up: [0.0, 0.0, 0.0]
+        },
+        sources: [],
+        interval: setInterval(function() { AL.scheduleContextAudio(ctx); }, AL.QUEUE_INTERVAL),
+        gain: gain,
+        distanceModel: 0xd002 /* AL_INVERSE_DISTANCE_CLAMPED */,
+        speedOfSound: 343.3,
+        dopplerFactor: 1.0,
+        sourceDistanceModel: false,
+        hrtf: hrtf || false,
+  
+        _err: 0,
+        get err() {
+          return this._err;
+        },
+        set err(val) {
+          // Errors should not be overwritten by later errors until they are cleared by a query.
+          if (this._err === 0 /* AL_NO_ERROR */ || val === 0 /* AL_NO_ERROR */) {
+            this._err = val;
+          }
+        }
+      };
+      AL.deviceRefCounts[deviceId]++;
+      AL.contexts[ctx.id] = ctx;
+  
+      if (hrtf !== null) {
+        // Apply hrtf attrib to all contexts for this device
+        for (var ctxId in AL.contexts) {
+          var c = AL.contexts[ctxId];
+          if (c.deviceId === deviceId) {
+            c.hrtf = hrtf;
+            AL.updateContextGlobal(c);
+          }
+        }
+      }
+  
+      return ctx.id;
+    }
+
+  function _alcMakeContextCurrent(contextId) {
+      if (contextId === 0) {
+        AL.currentCtx = null;
+        return 0;
+      } else {
+        AL.currentCtx = AL.contexts[contextId];
+        return 1;
+      }
+    }
+
+  function _alcOpenDevice(pDeviceName) {
+      if (pDeviceName) {
+        var name = UTF8ToString(pDeviceName);
+        if (name !== AL.DEVICE_NAME) {
+          return 0;
+        }
+      }
+  
+      if (typeof AudioContext != 'undefined' || typeof webkitAudioContext != 'undefined') {
+        var deviceId = AL.newId();
+        AL.deviceRefCounts[deviceId] = 0;
+        return deviceId;
+      } else {
+        return 0;
+      }
+    }
+
+  var JSEvents = {inEventHandler:0,removeAllEventListeners:function() {
+        for (var i = JSEvents.eventHandlers.length-1; i >= 0; --i) {
+          JSEvents._removeHandler(i);
+        }
+        JSEvents.eventHandlers = [];
+        JSEvents.deferredCalls = [];
+      },registerRemoveEventListeners:function() {
+        if (!JSEvents.removeEventListenersRegistered) {
+          __ATEXIT__.push(JSEvents.removeAllEventListeners);
+          JSEvents.removeEventListenersRegistered = true;
+        }
+      },deferredCalls:[],deferCall:function(targetFunction, precedence, argsList) {
+        function arraysHaveEqualContent(arrA, arrB) {
+          if (arrA.length != arrB.length) return false;
+  
+          for (var i in arrA) {
+            if (arrA[i] != arrB[i]) return false;
+          }
+          return true;
+        }
+        // Test if the given call was already queued, and if so, don't add it again.
+        for (var i in JSEvents.deferredCalls) {
+          var call = JSEvents.deferredCalls[i];
+          if (call.targetFunction == targetFunction && arraysHaveEqualContent(call.argsList, argsList)) {
+            return;
+          }
+        }
+        JSEvents.deferredCalls.push({
+          targetFunction: targetFunction,
+          precedence: precedence,
+          argsList: argsList
+        });
+  
+        JSEvents.deferredCalls.sort(function(x,y) { return x.precedence < y.precedence; });
+      },removeDeferredCalls:function(targetFunction) {
+        for (var i = 0; i < JSEvents.deferredCalls.length; ++i) {
+          if (JSEvents.deferredCalls[i].targetFunction == targetFunction) {
+            JSEvents.deferredCalls.splice(i, 1);
+            --i;
+          }
+        }
+      },canPerformEventHandlerRequests:function() {
+        return JSEvents.inEventHandler && JSEvents.currentEventHandler.allowsDeferredCalls;
+      },runDeferredCalls:function() {
+        if (!JSEvents.canPerformEventHandlerRequests()) {
+          return;
+        }
+        for (var i = 0; i < JSEvents.deferredCalls.length; ++i) {
+          var call = JSEvents.deferredCalls[i];
+          JSEvents.deferredCalls.splice(i, 1);
+          --i;
+          call.targetFunction.apply(null, call.argsList);
+        }
+      },eventHandlers:[],removeAllHandlersOnTarget:function(target, eventTypeString) {
+        for (var i = 0; i < JSEvents.eventHandlers.length; ++i) {
+          if (JSEvents.eventHandlers[i].target == target && 
+            (!eventTypeString || eventTypeString == JSEvents.eventHandlers[i].eventTypeString)) {
+             JSEvents._removeHandler(i--);
+           }
+        }
+      },_removeHandler:function(i) {
+        var h = JSEvents.eventHandlers[i];
+        h.target.removeEventListener(h.eventTypeString, h.eventListenerFunc, h.useCapture);
+        JSEvents.eventHandlers.splice(i, 1);
+      },registerOrRemoveHandler:function(eventHandler) {
+        var jsEventHandler = function jsEventHandler(event) {
+          // Increment nesting count for the event handler.
+          ++JSEvents.inEventHandler;
+          JSEvents.currentEventHandler = eventHandler;
+          // Process any old deferred calls the user has placed.
+          JSEvents.runDeferredCalls();
+          // Process the actual event, calls back to user C code handler.
+          eventHandler.handlerFunc(event);
+          // Process any new deferred calls that were placed right now from this event handler.
+          JSEvents.runDeferredCalls();
+          // Out of event handler - restore nesting count.
+          --JSEvents.inEventHandler;
+        };
+        
+        if (eventHandler.callbackfunc) {
+          eventHandler.eventListenerFunc = jsEventHandler;
+          eventHandler.target.addEventListener(eventHandler.eventTypeString, jsEventHandler, eventHandler.useCapture);
+          JSEvents.eventHandlers.push(eventHandler);
+          JSEvents.registerRemoveEventListeners();
+        } else {
+          for (var i = 0; i < JSEvents.eventHandlers.length; ++i) {
+            if (JSEvents.eventHandlers[i].target == eventHandler.target
+             && JSEvents.eventHandlers[i].eventTypeString == eventHandler.eventTypeString) {
+               JSEvents._removeHandler(i--);
+             }
+          }
+        }
+      },getNodeNameForTarget:function(target) {
+        if (!target) return '';
+        if (target == window) return '#window';
+        if (target == screen) return '#screen';
+        return (target && target.nodeName) ? target.nodeName : '';
+      },fullscreenEnabled:function() {
+        return document.fullscreenEnabled
+        // Safari 13.0.3 on macOS Catalina 10.15.1 still ships with prefixed webkitFullscreenEnabled.
+        // TODO: If Safari at some point ships with unprefixed version, update the version check above.
+        || document.webkitFullscreenEnabled
+         ;
+      }};
+  
+  function maybeCStringToJsString(cString) {
+      // "cString > 2" checks if the input is a number, and isn't of the special
+      // values we accept here, EMSCRIPTEN_EVENT_TARGET_* (which map to 0, 1, 2).
+      // In other words, if cString > 2 then it's a pointer to a valid place in
+      // memory, and points to a C string.
+      return cString > 2 ? UTF8ToString(cString) : cString;
+    }
+  
+  var specialHTMLTargets = [0, typeof document != 'undefined' ? document : 0, typeof window != 'undefined' ? window : 0];
+  function findEventTarget(target) {
+      target = maybeCStringToJsString(target);
+      var domElement = specialHTMLTargets[target] || (typeof document != 'undefined' ? document.querySelector(target) : undefined);
+      return domElement;
+    }
+  function findCanvasEventTarget(target) { return findEventTarget(target); }
+  function _emscripten_get_canvas_element_size(target, width, height) {
+      var canvas = findCanvasEventTarget(target);
+      if (!canvas) return -4;
+      HEAP32[((width)>>2)] = canvas.width;
+      HEAP32[((height)>>2)] = canvas.height;
+    }
+
+
+  function _emscripten_memcpy_big(dest, src, num) {
+      HEAPU8.copyWithin(dest, src, src + num);
+    }
+
+  function getHeapMax() {
+      return HEAPU8.length;
+    }
+  
+  function abortOnCannotGrowMemory(requestedSize) {
+      abort('Cannot enlarge memory arrays to size ' + requestedSize + ' bytes (OOM). Either (1) compile with -sINITIAL_MEMORY=X with X higher than the current value ' + HEAP8.length + ', (2) compile with -sALLOW_MEMORY_GROWTH which allows increasing the size at runtime, or (3) if you want malloc to return NULL (0) instead of this abort, compile with -sABORTING_MALLOC=0');
+    }
+  function _emscripten_resize_heap(requestedSize) {
+      var oldSize = HEAPU8.length;
+      requestedSize = requestedSize >>> 0;
+      abortOnCannotGrowMemory(requestedSize);
+    }
+
   function _emscripten_set_main_loop(func, fps, simulateInfiniteLoop) {
       var browserIterationFunc = getWasmTableEntry(func);
       setMainLoop(browserIterationFunc, fps, simulateInfiniteLoop);
@@ -5505,6 +7623,64 @@ var ASM_CONSTS = {
       return success ? 0 : -5;
     }
 
+  var ENV = {};
+  
+  function getExecutableName() {
+      return thisProgram || './this.program';
+    }
+  function getEnvStrings() {
+      if (!getEnvStrings.strings) {
+        // Default values.
+        // Browser language detection #8751
+        var lang = ((typeof navigator == 'object' && navigator.languages && navigator.languages[0]) || 'C').replace('-', '_') + '.UTF-8';
+        var env = {
+          'USER': 'web_user',
+          'LOGNAME': 'web_user',
+          'PATH': '/',
+          'PWD': '/',
+          'HOME': '/home/web_user',
+          'LANG': lang,
+          '_': getExecutableName()
+        };
+        // Apply the user-provided values, if any.
+        for (var x in ENV) {
+          // x is a key in ENV; if ENV[x] is undefined, that means it was
+          // explicitly set to be so. We allow user code to do that to
+          // force variables with default values to remain unset.
+          if (ENV[x] === undefined) delete env[x];
+          else env[x] = ENV[x];
+        }
+        var strings = [];
+        for (var x in env) {
+          strings.push(x + '=' + env[x]);
+        }
+        getEnvStrings.strings = strings;
+      }
+      return getEnvStrings.strings;
+    }
+  function _environ_get(__environ, environ_buf) {
+      var bufSize = 0;
+      getEnvStrings().forEach(function(string, i) {
+        var ptr = environ_buf + bufSize;
+        HEAPU32[(((__environ)+(i*4))>>2)] = ptr;
+        writeAsciiToMemory(string, ptr);
+        bufSize += string.length + 1;
+      });
+      return 0;
+    }
+
+  function _environ_sizes_get(penviron_count, penviron_buf_size) {
+      var strings = getEnvStrings();
+      HEAPU32[((penviron_count)>>2)] = strings.length;
+      var bufSize = 0;
+      strings.forEach(function(string) {
+        bufSize += string.length + 1;
+      });
+      HEAPU32[((penviron_buf_size)>>2)] = bufSize;
+      return 0;
+    }
+
+
   function _fd_close(fd) {
   try {
   
@@ -5589,6 +7765,10 @@ var ASM_CONSTS = {
     return e.errno;
   }
   }
+
+  function _getTempRet0() {
+      return getTempRet0();
+    }
 
   function _glAttachShader(program, shader) {
       GLctx.attachShader(GL.programs[program], GL.shaders[shader]);
@@ -5929,9 +8109,347 @@ var ASM_CONSTS = {
       GLctx.vertexAttribPointer(index, size, type, !!normalized, stride, ptr);
     }
 
+  function _llvm_eh_typeid_for(type) {
+      return type;
+    }
+
   function _setTempRet0(val) {
       setTempRet0(val);
     }
+
+  function __isLeapYear(year) {
+        return year%4 === 0 && (year%100 !== 0 || year%400 === 0);
+    }
+  
+  function __arraySum(array, index) {
+      var sum = 0;
+      for (var i = 0; i <= index; sum += array[i++]) {
+        // no-op
+      }
+      return sum;
+    }
+  
+  var __MONTH_DAYS_LEAP = [31,29,31,30,31,30,31,31,30,31,30,31];
+  
+  var __MONTH_DAYS_REGULAR = [31,28,31,30,31,30,31,31,30,31,30,31];
+  function __addDays(date, days) {
+      var newDate = new Date(date.getTime());
+      while (days > 0) {
+        var leap = __isLeapYear(newDate.getFullYear());
+        var currentMonth = newDate.getMonth();
+        var daysInCurrentMonth = (leap ? __MONTH_DAYS_LEAP : __MONTH_DAYS_REGULAR)[currentMonth];
+  
+        if (days > daysInCurrentMonth-newDate.getDate()) {
+          // we spill over to next month
+          days -= (daysInCurrentMonth-newDate.getDate()+1);
+          newDate.setDate(1);
+          if (currentMonth < 11) {
+            newDate.setMonth(currentMonth+1)
+          } else {
+            newDate.setMonth(0);
+            newDate.setFullYear(newDate.getFullYear()+1);
+          }
+        } else {
+          // we stay in current month
+          newDate.setDate(newDate.getDate()+days);
+          return newDate;
+        }
+      }
+  
+      return newDate;
+    }
+  function _strftime(s, maxsize, format, tm) {
+      // size_t strftime(char *restrict s, size_t maxsize, const char *restrict format, const struct tm *restrict timeptr);
+      // http://pubs.opengroup.org/onlinepubs/009695399/functions/strftime.html
+  
+      var tm_zone = HEAP32[(((tm)+(40))>>2)];
+  
+      var date = {
+        tm_sec: HEAP32[((tm)>>2)],
+        tm_min: HEAP32[(((tm)+(4))>>2)],
+        tm_hour: HEAP32[(((tm)+(8))>>2)],
+        tm_mday: HEAP32[(((tm)+(12))>>2)],
+        tm_mon: HEAP32[(((tm)+(16))>>2)],
+        tm_year: HEAP32[(((tm)+(20))>>2)],
+        tm_wday: HEAP32[(((tm)+(24))>>2)],
+        tm_yday: HEAP32[(((tm)+(28))>>2)],
+        tm_isdst: HEAP32[(((tm)+(32))>>2)],
+        tm_gmtoff: HEAP32[(((tm)+(36))>>2)],
+        tm_zone: tm_zone ? UTF8ToString(tm_zone) : ''
+      };
+  
+      var pattern = UTF8ToString(format);
+  
+      // expand format
+      var EXPANSION_RULES_1 = {
+        '%c': '%a %b %d %H:%M:%S %Y',     // Replaced by the locale's appropriate date and time representation - e.g., Mon Aug  3 14:02:01 2013
+        '%D': '%m/%d/%y',                 // Equivalent to %m / %d / %y
+        '%F': '%Y-%m-%d',                 // Equivalent to %Y - %m - %d
+        '%h': '%b',                       // Equivalent to %b
+        '%r': '%I:%M:%S %p',              // Replaced by the time in a.m. and p.m. notation
+        '%R': '%H:%M',                    // Replaced by the time in 24-hour notation
+        '%T': '%H:%M:%S',                 // Replaced by the time
+        '%x': '%m/%d/%y',                 // Replaced by the locale's appropriate date representation
+        '%X': '%H:%M:%S',                 // Replaced by the locale's appropriate time representation
+        // Modified Conversion Specifiers
+        '%Ec': '%c',                      // Replaced by the locale's alternative appropriate date and time representation.
+        '%EC': '%C',                      // Replaced by the name of the base year (period) in the locale's alternative representation.
+        '%Ex': '%m/%d/%y',                // Replaced by the locale's alternative date representation.
+        '%EX': '%H:%M:%S',                // Replaced by the locale's alternative time representation.
+        '%Ey': '%y',                      // Replaced by the offset from %EC (year only) in the locale's alternative representation.
+        '%EY': '%Y',                      // Replaced by the full alternative year representation.
+        '%Od': '%d',                      // Replaced by the day of the month, using the locale's alternative numeric symbols, filled as needed with leading zeros if there is any alternative symbol for zero; otherwise, with leading <space> characters.
+        '%Oe': '%e',                      // Replaced by the day of the month, using the locale's alternative numeric symbols, filled as needed with leading <space> characters.
+        '%OH': '%H',                      // Replaced by the hour (24-hour clock) using the locale's alternative numeric symbols.
+        '%OI': '%I',                      // Replaced by the hour (12-hour clock) using the locale's alternative numeric symbols.
+        '%Om': '%m',                      // Replaced by the month using the locale's alternative numeric symbols.
+        '%OM': '%M',                      // Replaced by the minutes using the locale's alternative numeric symbols.
+        '%OS': '%S',                      // Replaced by the seconds using the locale's alternative numeric symbols.
+        '%Ou': '%u',                      // Replaced by the weekday as a number in the locale's alternative representation (Monday=1).
+        '%OU': '%U',                      // Replaced by the week number of the year (Sunday as the first day of the week, rules corresponding to %U ) using the locale's alternative numeric symbols.
+        '%OV': '%V',                      // Replaced by the week number of the year (Monday as the first day of the week, rules corresponding to %V ) using the locale's alternative numeric symbols.
+        '%Ow': '%w',                      // Replaced by the number of the weekday (Sunday=0) using the locale's alternative numeric symbols.
+        '%OW': '%W',                      // Replaced by the week number of the year (Monday as the first day of the week) using the locale's alternative numeric symbols.
+        '%Oy': '%y',                      // Replaced by the year (offset from %C ) using the locale's alternative numeric symbols.
+      };
+      for (var rule in EXPANSION_RULES_1) {
+        pattern = pattern.replace(new RegExp(rule, 'g'), EXPANSION_RULES_1[rule]);
+      }
+  
+      var WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  
+      function leadingSomething(value, digits, character) {
+        var str = typeof value == 'number' ? value.toString() : (value || '');
+        while (str.length < digits) {
+          str = character[0]+str;
+        }
+        return str;
+      }
+  
+      function leadingNulls(value, digits) {
+        return leadingSomething(value, digits, '0');
+      }
+  
+      function compareByDay(date1, date2) {
+        function sgn(value) {
+          return value < 0 ? -1 : (value > 0 ? 1 : 0);
+        }
+  
+        var compare;
+        if ((compare = sgn(date1.getFullYear()-date2.getFullYear())) === 0) {
+          if ((compare = sgn(date1.getMonth()-date2.getMonth())) === 0) {
+            compare = sgn(date1.getDate()-date2.getDate());
+          }
+        }
+        return compare;
+      }
+  
+      function getFirstWeekStartDate(janFourth) {
+          switch (janFourth.getDay()) {
+            case 0: // Sunday
+              return new Date(janFourth.getFullYear()-1, 11, 29);
+            case 1: // Monday
+              return janFourth;
+            case 2: // Tuesday
+              return new Date(janFourth.getFullYear(), 0, 3);
+            case 3: // Wednesday
+              return new Date(janFourth.getFullYear(), 0, 2);
+            case 4: // Thursday
+              return new Date(janFourth.getFullYear(), 0, 1);
+            case 5: // Friday
+              return new Date(janFourth.getFullYear()-1, 11, 31);
+            case 6: // Saturday
+              return new Date(janFourth.getFullYear()-1, 11, 30);
+          }
+      }
+  
+      function getWeekBasedYear(date) {
+          var thisDate = __addDays(new Date(date.tm_year+1900, 0, 1), date.tm_yday);
+  
+          var janFourthThisYear = new Date(thisDate.getFullYear(), 0, 4);
+          var janFourthNextYear = new Date(thisDate.getFullYear()+1, 0, 4);
+  
+          var firstWeekStartThisYear = getFirstWeekStartDate(janFourthThisYear);
+          var firstWeekStartNextYear = getFirstWeekStartDate(janFourthNextYear);
+  
+          if (compareByDay(firstWeekStartThisYear, thisDate) <= 0) {
+            // this date is after the start of the first week of this year
+            if (compareByDay(firstWeekStartNextYear, thisDate) <= 0) {
+              return thisDate.getFullYear()+1;
+            } else {
+              return thisDate.getFullYear();
+            }
+          } else {
+            return thisDate.getFullYear()-1;
+          }
+      }
+  
+      var EXPANSION_RULES_2 = {
+        '%a': function(date) {
+          return WEEKDAYS[date.tm_wday].substring(0,3);
+        },
+        '%A': function(date) {
+          return WEEKDAYS[date.tm_wday];
+        },
+        '%b': function(date) {
+          return MONTHS[date.tm_mon].substring(0,3);
+        },
+        '%B': function(date) {
+          return MONTHS[date.tm_mon];
+        },
+        '%C': function(date) {
+          var year = date.tm_year+1900;
+          return leadingNulls((year/100)|0,2);
+        },
+        '%d': function(date) {
+          return leadingNulls(date.tm_mday, 2);
+        },
+        '%e': function(date) {
+          return leadingSomething(date.tm_mday, 2, ' ');
+        },
+        '%g': function(date) {
+          // %g, %G, and %V give values according to the ISO 8601:2000 standard week-based year.
+          // In this system, weeks begin on a Monday and week 1 of the year is the week that includes
+          // January 4th, which is also the week that includes the first Thursday of the year, and
+          // is also the first week that contains at least four days in the year.
+          // If the first Monday of January is the 2nd, 3rd, or 4th, the preceding days are part of
+          // the last week of the preceding year; thus, for Saturday 2nd January 1999,
+          // %G is replaced by 1998 and %V is replaced by 53. If December 29th, 30th,
+          // or 31st is a Monday, it and any following days are part of week 1 of the following year.
+          // Thus, for Tuesday 30th December 1997, %G is replaced by 1998 and %V is replaced by 01.
+  
+          return getWeekBasedYear(date).toString().substring(2);
+        },
+        '%G': function(date) {
+          return getWeekBasedYear(date);
+        },
+        '%H': function(date) {
+          return leadingNulls(date.tm_hour, 2);
+        },
+        '%I': function(date) {
+          var twelveHour = date.tm_hour;
+          if (twelveHour == 0) twelveHour = 12;
+          else if (twelveHour > 12) twelveHour -= 12;
+          return leadingNulls(twelveHour, 2);
+        },
+        '%j': function(date) {
+          // Day of the year (001-366)
+          return leadingNulls(date.tm_mday+__arraySum(__isLeapYear(date.tm_year+1900) ? __MONTH_DAYS_LEAP : __MONTH_DAYS_REGULAR, date.tm_mon-1), 3);
+        },
+        '%m': function(date) {
+          return leadingNulls(date.tm_mon+1, 2);
+        },
+        '%M': function(date) {
+          return leadingNulls(date.tm_min, 2);
+        },
+        '%n': function() {
+          return '\n';
+        },
+        '%p': function(date) {
+          if (date.tm_hour >= 0 && date.tm_hour < 12) {
+            return 'AM';
+          } else {
+            return 'PM';
+          }
+        },
+        '%S': function(date) {
+          return leadingNulls(date.tm_sec, 2);
+        },
+        '%t': function() {
+          return '\t';
+        },
+        '%u': function(date) {
+          return date.tm_wday || 7;
+        },
+        '%U': function(date) {
+          var days = date.tm_yday + 7 - date.tm_wday;
+          return leadingNulls(Math.floor(days / 7), 2);
+        },
+        '%V': function(date) {
+          // Replaced by the week number of the year (Monday as the first day of the week)
+          // as a decimal number [01,53]. If the week containing 1 January has four
+          // or more days in the new year, then it is considered week 1.
+          // Otherwise, it is the last week of the previous year, and the next week is week 1.
+          // Both January 4th and the first Thursday of January are always in week 1. [ tm_year, tm_wday, tm_yday]
+          var val = Math.floor((date.tm_yday + 7 - (date.tm_wday + 6) % 7 ) / 7);
+          // If 1 Jan is just 1-3 days past Monday, the previous week
+          // is also in this year.
+          if ((date.tm_wday + 371 - date.tm_yday - 2) % 7 <= 2) {
+            val++;
+          }
+          if (!val) {
+            val = 52;
+            // If 31 December of prev year a Thursday, or Friday of a
+            // leap year, then the prev year has 53 weeks.
+            var dec31 = (date.tm_wday + 7 - date.tm_yday - 1) % 7;
+            if (dec31 == 4 || (dec31 == 5 && __isLeapYear(date.tm_year%400-1))) {
+              val++;
+            }
+          } else if (val == 53) {
+            // If 1 January is not a Thursday, and not a Wednesday of a
+            // leap year, then this year has only 52 weeks.
+            var jan1 = (date.tm_wday + 371 - date.tm_yday) % 7;
+            if (jan1 != 4 && (jan1 != 3 || !__isLeapYear(date.tm_year)))
+              val = 1;
+          }
+          return leadingNulls(val, 2);
+        },
+        '%w': function(date) {
+          return date.tm_wday;
+        },
+        '%W': function(date) {
+          var days = date.tm_yday + 7 - ((date.tm_wday + 6) % 7);
+          return leadingNulls(Math.floor(days / 7), 2);
+        },
+        '%y': function(date) {
+          // Replaced by the last two digits of the year as a decimal number [00,99]. [ tm_year]
+          return (date.tm_year+1900).toString().substring(2);
+        },
+        '%Y': function(date) {
+          // Replaced by the year as a decimal number (for example, 1997). [ tm_year]
+          return date.tm_year+1900;
+        },
+        '%z': function(date) {
+          // Replaced by the offset from UTC in the ISO 8601:2000 standard format ( +hhmm or -hhmm ).
+          // For example, "-0430" means 4 hours 30 minutes behind UTC (west of Greenwich).
+          var off = date.tm_gmtoff;
+          var ahead = off >= 0;
+          off = Math.abs(off) / 60;
+          // convert from minutes into hhmm format (which means 60 minutes = 100 units)
+          off = (off / 60)*100 + (off % 60);
+          return (ahead ? '+' : '-') + String("0000" + off).slice(-4);
+        },
+        '%Z': function(date) {
+          return date.tm_zone;
+        },
+        '%%': function() {
+          return '%';
+        }
+      };
+  
+      // Replace %% with a pair of NULLs (which cannot occur in a C string), then
+      // re-inject them after processing.
+      pattern = pattern.replace(/%%/g, '\0\0')
+      for (var rule in EXPANSION_RULES_2) {
+        if (pattern.includes(rule)) {
+          pattern = pattern.replace(new RegExp(rule, 'g'), EXPANSION_RULES_2[rule](date));
+        }
+      }
+      pattern = pattern.replace(/\0\0/g, '%')
+  
+      var bytes = intArrayFromString(pattern, false);
+      if (bytes.length > maxsize) {
+        return 0;
+      }
+  
+      writeArrayToMemory(bytes, s);
+      return bytes.length-1;
+    }
+  function _strftime_l(s, maxsize, format, tm) {
+      return _strftime(s, maxsize, format, tm); // no locale support yet
+    }
+
 
   var FSNode = /** @constructor */ function(parent, name, mode, rdev) {
     if (!parent) {
@@ -5978,7 +8496,7 @@ var ASM_CONSTS = {
    }
   });
   FS.FSNode = FSNode;
-  FS.staticInit();;
+  FS.staticInit();Module["FS_createPath"] = FS.createPath;Module["FS_createDataFile"] = FS.createDataFile;Module["FS_createPreloadedFile"] = FS.createPreloadedFile;Module["FS_unlink"] = FS.unlink;Module["FS_createLazyFile"] = FS.createLazyFile;Module["FS_createDevice"] = FS.createDevice;;
 ERRNO_CODES = {
       'EPERM': 63,
       'ENOENT': 44,
@@ -6143,18 +8661,113 @@ function intArrayToString(array) {
 }
 
 
+// Copied from https://github.com/strophe/strophejs/blob/e06d027/src/polyfills.js#L149
+
+// This code was written by Tyler Akins and has been placed in the
+// public domain.  It would be nice if you left this header intact.
+// Base64 code from Tyler Akins -- http://rumkin.com
+
+/**
+ * Decodes a base64 string.
+ * @param {string} input The string to decode.
+ */
+var decodeBase64 = typeof atob == 'function' ? atob : function (input) {
+  var keyStr = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+
+  var output = '';
+  var chr1, chr2, chr3;
+  var enc1, enc2, enc3, enc4;
+  var i = 0;
+  // remove all characters that are not A-Z, a-z, 0-9, +, /, or =
+  input = input.replace(/[^A-Za-z0-9\+\/\=]/g, '');
+  do {
+    enc1 = keyStr.indexOf(input.charAt(i++));
+    enc2 = keyStr.indexOf(input.charAt(i++));
+    enc3 = keyStr.indexOf(input.charAt(i++));
+    enc4 = keyStr.indexOf(input.charAt(i++));
+
+    chr1 = (enc1 << 2) | (enc2 >> 4);
+    chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+    chr3 = ((enc3 & 3) << 6) | enc4;
+
+    output = output + String.fromCharCode(chr1);
+
+    if (enc3 !== 64) {
+      output = output + String.fromCharCode(chr2);
+    }
+    if (enc4 !== 64) {
+      output = output + String.fromCharCode(chr3);
+    }
+  } while (i < input.length);
+  return output;
+};
+
+// Converts a string of base64 into a byte array.
+// Throws error on invalid input.
+function intArrayFromBase64(s) {
+  if (typeof ENVIRONMENT_IS_NODE == 'boolean' && ENVIRONMENT_IS_NODE) {
+    var buf = Buffer.from(s, 'base64');
+    return new Uint8Array(buf['buffer'], buf['byteOffset'], buf['byteLength']);
+  }
+
+  try {
+    var decoded = decodeBase64(s);
+    var bytes = new Uint8Array(decoded.length);
+    for (var i = 0 ; i < decoded.length ; ++i) {
+      bytes[i] = decoded.charCodeAt(i);
+    }
+    return bytes;
+  } catch (_) {
+    throw new Error('Converting base64 string to bytes failed.');
+  }
+}
+
+// If filename is a base64 data URI, parses and returns data (Buffer on node,
+// Uint8Array otherwise). If filename is not a base64 data URI, returns undefined.
+function tryParseAsDataURI(filename) {
+  if (!isDataURI(filename)) {
+    return;
+  }
+
+  return intArrayFromBase64(filename.slice(dataURIPrefix.length));
+}
+
+
 function checkIncomingModuleAPI() {
   ignoredModuleProp('fetchSettings');
 }
 var asmLibraryArg = {
+  "__assert_fail": ___assert_fail,
   "__cxa_allocate_exception": ___cxa_allocate_exception,
+  "__cxa_begin_catch": ___cxa_begin_catch,
+  "__cxa_end_catch": ___cxa_end_catch,
+  "__cxa_find_matching_catch_2": ___cxa_find_matching_catch_2,
+  "__cxa_find_matching_catch_3": ___cxa_find_matching_catch_3,
+  "__cxa_free_exception": ___cxa_free_exception,
+  "__cxa_rethrow": ___cxa_rethrow,
   "__cxa_throw": ___cxa_throw,
+  "__cxa_uncaught_exceptions": ___cxa_uncaught_exceptions,
+  "__resumeException": ___resumeException,
   "__syscall_fcntl64": ___syscall_fcntl64,
   "__syscall_ioctl": ___syscall_ioctl,
   "__syscall_openat": ___syscall_openat,
   "abort": _abort,
+  "alBufferData": _alBufferData,
+  "alDeleteBuffers": _alDeleteBuffers,
+  "alDeleteSources": _alDeleteSources,
+  "alGenBuffers": _alGenBuffers,
+  "alGenSources": _alGenSources,
+  "alGetError": _alGetError,
+  "alIsExtensionPresent": _alIsExtensionPresent,
+  "alListenerfv": _alListenerfv,
+  "alSourcePlay": _alSourcePlay,
+  "alSourcef": _alSourcef,
+  "alSourcefv": _alSourcefv,
+  "alSourcei": _alSourcei,
+  "alcCreateContext": _alcCreateContext,
+  "alcMakeContextCurrent": _alcMakeContextCurrent,
+  "alcOpenDevice": _alcOpenDevice,
   "emscripten_get_canvas_element_size": _emscripten_get_canvas_element_size,
-  "emscripten_get_mouse_status": _emscripten_get_mouse_status,
   "emscripten_get_now": _emscripten_get_now,
   "emscripten_memcpy_big": _emscripten_memcpy_big,
   "emscripten_resize_heap": _emscripten_resize_heap,
@@ -6162,10 +8775,14 @@ var asmLibraryArg = {
   "emscripten_set_mousedown_callback_on_thread": _emscripten_set_mousedown_callback_on_thread,
   "emscripten_webgl_create_context": _emscripten_webgl_create_context,
   "emscripten_webgl_make_context_current": _emscripten_webgl_make_context_current,
+  "environ_get": _environ_get,
+  "environ_sizes_get": _environ_sizes_get,
+  "exit": _exit,
   "fd_close": _fd_close,
   "fd_read": _fd_read,
   "fd_seek": _fd_seek,
   "fd_write": _fd_write,
+  "getTempRet0": _getTempRet0,
   "glAttachShader": _glAttachShader,
   "glBindAttribLocation": _glBindAttribLocation,
   "glBindBuffer": _glBindBuffer,
@@ -6195,7 +8812,33 @@ var asmLibraryArg = {
   "glUniform4f": _glUniform4f,
   "glUseProgram": _glUseProgram,
   "glVertexAttribPointer": _glVertexAttribPointer,
-  "setTempRet0": _setTempRet0
+  "invoke_d": invoke_d,
+  "invoke_diii": invoke_diii,
+  "invoke_fiii": invoke_fiii,
+  "invoke_i": invoke_i,
+  "invoke_ii": invoke_ii,
+  "invoke_iii": invoke_iii,
+  "invoke_iiii": invoke_iiii,
+  "invoke_iiiii": invoke_iiiii,
+  "invoke_iiiiii": invoke_iiiiii,
+  "invoke_iiiiiii": invoke_iiiiiii,
+  "invoke_iiiiiiii": invoke_iiiiiiii,
+  "invoke_iiiiiiiiiii": invoke_iiiiiiiiiii,
+  "invoke_iiiiiiiiiiii": invoke_iiiiiiiiiiii,
+  "invoke_iiiiiiiiiiiii": invoke_iiiiiiiiiiiii,
+  "invoke_jiiii": invoke_jiiii,
+  "invoke_v": invoke_v,
+  "invoke_vi": invoke_vi,
+  "invoke_vii": invoke_vii,
+  "invoke_viii": invoke_viii,
+  "invoke_viiii": invoke_viiii,
+  "invoke_viiiiiii": invoke_viiiiiii,
+  "invoke_viiiiiiiiii": invoke_viiiiiiiiii,
+  "invoke_viiiiiiiiiiiiiii": invoke_viiiiiiiiiiiiiii,
+  "invoke_viijii": invoke_viijii,
+  "llvm_eh_typeid_for": _llvm_eh_typeid_for,
+  "setTempRet0": _setTempRet0,
+  "strftime_l": _strftime_l
 };
 var asm = createWasm();
 /** @type {function(...*):?} */
@@ -6205,6 +8848,9 @@ var ___wasm_call_ctors = Module["___wasm_call_ctors"] = createExportWrapper("__w
 var _malloc = Module["_malloc"] = createExportWrapper("malloc");
 
 /** @type {function(...*):?} */
+var _free = Module["_free"] = createExportWrapper("free");
+
+/** @type {function(...*):?} */
 var _main = Module["_main"] = createExportWrapper("__main_argc_argv");
 
 /** @type {function(...*):?} */
@@ -6212,6 +8858,9 @@ var ___errno_location = Module["___errno_location"] = createExportWrapper("__err
 
 /** @type {function(...*):?} */
 var _fflush = Module["_fflush"] = createExportWrapper("fflush");
+
+/** @type {function(...*):?} */
+var _setThrew = Module["_setThrew"] = createExportWrapper("setThrew");
 
 /** @type {function(...*):?} */
 var _emscripten_stack_init = Module["_emscripten_stack_init"] = function() {
@@ -6243,11 +8892,293 @@ var stackRestore = Module["stackRestore"] = createExportWrapper("stackRestore");
 var stackAlloc = Module["stackAlloc"] = createExportWrapper("stackAlloc");
 
 /** @type {function(...*):?} */
+var ___cxa_can_catch = Module["___cxa_can_catch"] = createExportWrapper("__cxa_can_catch");
+
+/** @type {function(...*):?} */
 var ___cxa_is_pointer_type = Module["___cxa_is_pointer_type"] = createExportWrapper("__cxa_is_pointer_type");
 
 /** @type {function(...*):?} */
 var dynCall_jiji = Module["dynCall_jiji"] = createExportWrapper("dynCall_jiji");
 
+/** @type {function(...*):?} */
+var dynCall_viijii = Module["dynCall_viijii"] = createExportWrapper("dynCall_viijii");
+
+/** @type {function(...*):?} */
+var dynCall_jiiii = Module["dynCall_jiiii"] = createExportWrapper("dynCall_jiiii");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiij = Module["dynCall_iiiiij"] = createExportWrapper("dynCall_iiiiij");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiijj = Module["dynCall_iiiiijj"] = createExportWrapper("dynCall_iiiiijj");
+
+/** @type {function(...*):?} */
+var dynCall_iiiiiijj = Module["dynCall_iiiiiijj"] = createExportWrapper("dynCall_iiiiiijj");
+
+
+function invoke_iiii(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iii(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_ii(index,a1) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vii(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viii(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vi(index,a1) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_v(index) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)();
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_d(index) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)();
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiii(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiii(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_fiii(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diii(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_i(index) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)();
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viijii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    dynCall_viijii(index,a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_jiiii(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return dynCall_jiiii(index,a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
 
 
 
@@ -6267,16 +9198,16 @@ unexportedRuntimeFunction('addOnInit', false);
 unexportedRuntimeFunction('addOnPreMain', false);
 unexportedRuntimeFunction('addOnExit', false);
 unexportedRuntimeFunction('addOnPostRun', false);
-unexportedRuntimeFunction('addRunDependency', true);
-unexportedRuntimeFunction('removeRunDependency', true);
+Module["addRunDependency"] = addRunDependency;
+Module["removeRunDependency"] = removeRunDependency;
 unexportedRuntimeFunction('FS_createFolder', false);
-unexportedRuntimeFunction('FS_createPath', true);
-unexportedRuntimeFunction('FS_createDataFile', true);
-unexportedRuntimeFunction('FS_createPreloadedFile', true);
-unexportedRuntimeFunction('FS_createLazyFile', true);
+Module["FS_createPath"] = FS.createPath;
+Module["FS_createDataFile"] = FS.createDataFile;
+Module["FS_createPreloadedFile"] = FS.createPreloadedFile;
+Module["FS_createLazyFile"] = FS.createLazyFile;
 unexportedRuntimeFunction('FS_createLink', false);
-unexportedRuntimeFunction('FS_createDevice', true);
-unexportedRuntimeFunction('FS_unlink', true);
+Module["FS_createDevice"] = FS.createDevice;
+Module["FS_unlink"] = FS.unlink;
 unexportedRuntimeFunction('getLEB', false);
 unexportedRuntimeFunction('getFunctionTables', false);
 unexportedRuntimeFunction('alignFunctionTables', false);
@@ -6446,6 +9377,9 @@ unexportedRuntimeFunction('exceptionCaught', false);
 unexportedRuntimeFunction('ExceptionInfo', false);
 unexportedRuntimeFunction('exception_addRef', false);
 unexportedRuntimeFunction('exception_decRef', false);
+unexportedRuntimeFunction('incrementExceptionRefcount', false);
+unexportedRuntimeFunction('decrementExceptionRefcount', false);
+unexportedRuntimeFunction('getExceptionMessage', false);
 unexportedRuntimeFunction('Browser', false);
 unexportedRuntimeFunction('setMainLoop', false);
 unexportedRuntimeFunction('wget', false);

@@ -56,6 +56,7 @@ class Texture {
 public:
 	void* handle;
 	void create(std::string filename);
+	void create(unsigned char* rgbaPixels, int width, int height);
 	~Texture();
 };
 

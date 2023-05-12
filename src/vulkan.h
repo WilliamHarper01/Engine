@@ -20,6 +20,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
+
 #include <config.h>
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
@@ -54,6 +57,7 @@ struct SwapChainSupportDetails {
 struct Vertex {
     glm::vec3 pos;
     glm::vec2 texCoord;
+    glm::vec3 normal;
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -65,7 +69,7 @@ struct Vertex {
     }
 
     static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
-        std::vector<VkVertexInputAttributeDescription> attributeDescriptions(2);
+        std::vector<VkVertexInputAttributeDescription> attributeDescriptions(3);
 
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
@@ -77,7 +81,16 @@ struct Vertex {
         attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
         attributeDescriptions[1].offset = offsetof(Vertex, texCoord);
 
+        attributeDescriptions[2].binding = 0;
+        attributeDescriptions[2].location = 2;
+        attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[2].offset = offsetof(Vertex, normal);
+
         return attributeDescriptions;
+    }
+
+    bool operator==(const Vertex& other) const {
+        return pos == other.pos && normal == other.normal && texCoord == other.texCoord;
     }
 };
 
@@ -114,6 +127,13 @@ public:
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
+    
+    glm::vec2 pos;
+    glm::vec2 size;
+    float rot;
+    float depth;
+    glm::vec2 cameraPos;
+    glm::vec4 color;
 
     VkMVP();
 };

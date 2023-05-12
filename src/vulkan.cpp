@@ -1,10 +1,10 @@
 #include "graphics.h"
 #include "vulkan.h"
 
-Color clearColor = {1.0f, 1.0f, 1.0f, 1.0f};
+Color clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
 
 std::vector<Render*> objects = {};
-V3 cameraPos(-1.0f, 0.0f, 0.70f);
+V3 cameraPos(-5.0f, 0.0f, 1.5f);
 V3 cameraLook(1.0f, 0.0f, 0.0f);
 
 void createWindow() {
@@ -125,12 +125,23 @@ bool renderFrame() {
         {
             VkRender3d* r = (VkRender3d*)i->handle;
             r->transform.model = glm::translate(glm::mat4(1.0),
-                glm::vec3(i->pos.x, i->pos.y, i->pos.z));
+                glm::vec3(0.0, 0.0, 0.0));
             r->transform.model = glm::scale(r->transform.model,
-                glm::vec3(i->scale.x, i->scale.y, i->scale.z));
+                glm::vec3(1.0, 1.0, 1.0));
+            r->transform.model = glm::rotate(r->transform.model, i->rot.x,
+                glm::vec3(1.0, 0.0, 0.0));
+            r->transform.model = glm::rotate(r->transform.model, i->rot.y,
+                glm::vec3(0.0, 1.0, 0.0));
+            r->transform.model = glm::rotate(r->transform.model, i->rot.z,
+                glm::vec3(0.0, 0.0, 1.0));
             r->transform.view = glm::lookAt(glm::vec3(cameraPos.x, cameraPos.y, cameraPos.z),
                 glm::vec3(cameraLook.x, cameraLook.y, cameraLook.z),
                 glm::vec3(0.0f, 0.0f, 1.0f));
+
+            r->transform.pos = glm::vec2(i->pos.x, i->pos.y);
+            r->transform.depth = i->pos.z;
+            r->transform.size = glm::vec2(i->scale.x, i->scale.y);
+            r->transform.color = {i->color.r, i->color.g, i->color.b, i->color.a};
 
         }
         else
@@ -140,22 +151,22 @@ bool renderFrame() {
             r->transform.depth = i->pos.z;
             r->transform.size = glm::vec2(i->scale.x, i->scale.y);
             r->transform.color = {i->color.r, i->color.g, i->color.b, i->color.a};
-            
-            if (!checkInside(cx, cy, i->pos.x, i->pos.y, i->scale.x, i->scale.y))
+        }
+
+        if (!checkInside(cx, cy, i->pos.x, i->pos.y, i->scale.x, i->scale.y))
                 continue;
 
-            if (mouseLeftPressed == false && mouseLeft == GLFW_PRESS && i->onClick != nullptr) {
-                i->onClick(i, MOUSE_LEFT);
-            }
-            if (mouseRightPressed == false && mouseRight == GLFW_PRESS && i->onClick != nullptr) {
-                i->onClick(i, MOUSE_RIGHT);
-            }
-            if (mouseLeft == GLFW_PRESS && i->onClickDown != nullptr){
-                i->onClickDown(i, MOUSE_LEFT);
-            }
-            if (mouseRight == GLFW_PRESS && i->onClickDown != nullptr){
-                i->onClickDown(i, MOUSE_RIGHT);
-            }
+        if (mouseLeftPressed == false && mouseLeft == GLFW_PRESS && i->onClick != nullptr) {
+            i->onClick(i, MOUSE_LEFT);
+        }
+        if (mouseRightPressed == false && mouseRight == GLFW_PRESS && i->onClick != nullptr) {
+            i->onClick(i, MOUSE_RIGHT);
+        }
+        if (mouseLeft == GLFW_PRESS && i->onClickDown != nullptr){
+            i->onClickDown(i, MOUSE_LEFT);
+        }
+        if (mouseRight == GLFW_PRESS && i->onClickDown != nullptr){
+            i->onClickDown(i, MOUSE_RIGHT);
         }
     }
 
@@ -1900,7 +1911,10 @@ VkTexture::VkTexture(std::string filename)
 VkTexture::VkTexture(unsigned char* pixels, int width, int height, int channels)
 {
     loadImage(pixels, width, height, channels);
-    createTextureImageView(VK_FORMAT_R8_SRGB);
+    if (channels == 4)
+        createTextureImageView(VK_FORMAT_R8G8B8A8_SRGB);
+    else
+        createTextureImageView(VK_FORMAT_R8_SRGB);
     textures.push_back(this);
 }
 
@@ -1987,10 +2001,24 @@ void VkTexture::cleanup()
     }
 }
 
+int vertexIsUnique(std::vector<Vertex> & uniqueVertices, Vertex vertex)
+{
+    for (int i=0; i < uniqueVertices.size(); i++)
+    {
+        if (uniqueVertices[i].pos == vertex.pos)
+        {
+            return i;
+        }
+    }
+    return uniqueVertices.size();
+}
+
 VkMesh::VkMesh(std::string filename)
 {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
+    //std::vector<glm::vec3> faceNormals;
+   // int faceLoop = 0;
 
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
@@ -2022,11 +2050,61 @@ VkMesh::VkMesh(std::string filename)
                 1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
             };
 
-            vertices.push_back(vertex);
-            indices.push_back(indices.size());
-        }
-    }
+            vertex.normal = {
+                attrib.normals[3 * index.normal_index + 0],
+                attrib.normals[3 * index.normal_index + 1],
+                attrib.normals[3 * index.normal_index + 2]
+            };
 
+            //int result = vertexIsUnique(vertices, vertex);
+
+            //if (result == vertices.size()) {
+            vertices.push_back(vertex);
+            //}
+            indices.push_back(indices.size());
+            
+            /*
+            if(faceLoop == 0)
+            {
+                faceNormals.push_back(
+                    {attrib.normals[3 * index.normal_index + 0],
+                     attrib.normals[3 * index.normal_index + 1],
+                     attrib.normals[3 * index.normal_index + 2] }
+                );
+            }
+            faceLoop = (faceLoop + 1) % 3;
+            */
+        }
+        break;
+    }
+/*
+    
+    for(int i=0; i<vertices.size(); i++)
+    {
+        int nboors = 0;
+        glm::vec3 norm = {0.0f, 0.0f, 0.0f};
+        std::vector<int> uniques = {};
+        for (int j=0; j<faceNormals.size(); j++)
+        {
+            bool isUnique = true;
+            for (int k : uniques)
+                if (faceNormals[k] == faceNormals[j])
+                    isUnique = false;
+            
+            if (!isUnique)
+                continue;
+            
+            if (indices[j*3+0] == i || indices[j*3+1] == i || indices[j*3+2] == i)
+            {
+                nboors++;
+                norm = faceNormals[j] + norm;
+                uniques.push_back(j);
+            }
+        }
+        vertices[i].normal = glm::normalize(norm);
+    }
+    
+*/
     createVertexBuffer(vertices);
     createIndexBuffer(indices);
     meshes.push_back(this);
@@ -2113,6 +2191,13 @@ VkMVP::VkMVP()
     proj = glm::perspective(glm::radians(45.0f),
         swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
     proj[1][1] *= -1;
+
+    pos = { 0.0f, 0.0f };
+    size = { 1.0f, 1.0f };
+    rot = 0.0f;
+    depth = 1.0f;
+    cameraPos = { 0.0f, 0.0f };
+    color = {1.0f, 1.0f, 1.0f, 1.0f};
 }
 
 void Mesh::create(std::string filename)
@@ -2129,6 +2214,12 @@ Mesh::~Mesh()
 void Texture::create(std::string filename)
 {
     VkTexture* t = new VkTexture(filename);
+    this->handle = t;
+}
+
+void Texture::create(unsigned char* rgbaPixels, int width, int height)
+{
+    VkTexture* t = new VkTexture(rgbaPixels, width, height, 4);
     this->handle = t;
 }
 
@@ -2167,6 +2258,7 @@ void Render::create(Mesh& mesh, Texture& tex)
     scale.x = 1.0;
     scale.y = 1.0;
     scale.z = 1.0;
+    pos.z = 1.0;
     objects.push_back(this);
     isCreated = true;
 }

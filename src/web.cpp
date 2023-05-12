@@ -1,10 +1,10 @@
 #include "graphics.h"
 #include "web.h"
 
-Color clearColor = {1.0f, 0.0f, 0.0f, 1.0f};
+Color clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
 
 std::vector<Render*> objects = {};
-V3 cameraPos(-0.0f, 0.0f, 0.70f);
+V3 cameraPos(-1.0f, 0.0f, 0.70f);
 V3 cameraLook(1.0f, 0.0f, 0.0f);
 
 GLuint buffer;
@@ -102,8 +102,14 @@ void Texture::create(std::string filename) {
     
 }
 
+void Texture::create(unsigned char* rgbaPixels, int width, int height)
+{
+    WebTexture t = new WebTexture();
+    this->handle = (void*) t;
+}
+
 Texture::~Texture() {
-    
+    delete (WebTexture*)this->handle;
 }
 
 Font::~Font() {
@@ -123,7 +129,7 @@ WebRender::~WebRender()
 {
     for(int i=0; i<renders.size(); i++)
     {
-        if (renders[i] == this) renders.erase(i + renders.begin()); return;
+        if (renders[i] == this) delete renders[i]; renders.erase(i + renders.begin()); return;
     }
 }
 
@@ -145,6 +151,7 @@ void Render::create(Texture& tex)
     is3d = false;
     scale.x = 1.0;
     scale.y = 1.0;
+    scale.z = 1.0;
     pos.z = 1.0;
     objects.push_back(this);
     isCreated = true;
@@ -293,7 +300,7 @@ void renderFrame()
         glUniform2f(uboPosLoc, r->pos.x, r->pos.y);
         glUniform2f(uboSizeLoc, r->scale.x, r->scale.y);
         glUniform1f(uboRotLoc, r->rot.x);
-        glUniform1f(uboFovLoc, r->scale.z);
+        glUniform1f(uboFovLoc, r->pos.z);
         glUniform2f(uboCameraLoc, 0.0f, 0.0f);
         glUniform4f(uboColorLoc, r->color.r, r->color.g, r->color.b, r->color.a);
         glDrawArrays(GL_TRIANGLES, 0, 6);

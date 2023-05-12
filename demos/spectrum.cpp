@@ -16,6 +16,15 @@ const double PI = 3.141592653589793238460;
 typedef std::complex<double> Complex;
 typedef std::valarray<Complex> CArray;
 
+WAV wav;
+
+#define BARS 120
+Complex sub[WAVELENGTH_SUB];
+int s;
+Render r[BARS];
+
+double timeStart;
+
 // Cooley-Tukey FFT (in-place, breadth-first, decimation-in-frequency)
 // Better optimized but less intuitive
 void fft(CArray& x)
@@ -71,11 +80,6 @@ void fftMag(CArray& x)
     }
 }
 
-#define BARS 120
-Complex sub[WAVELENGTH_SUB];
-int s;
-Render r[BARS];
-
 void update()
 {
 	double cTime = currTime() - timeStart;
@@ -109,7 +113,6 @@ int spectrum(int argc, char** argv)
 	}
 	
 	startAudio();
-	WAV wav;
 	wav.load(argv[1]);
 	AudioSource a;
 	a.init(wav);
@@ -130,8 +133,9 @@ int spectrum(int argc, char** argv)
 	}
 	
 	a.play();
-	double timeStart = currTime();
+	timeStart = currTime();
 
 	startLoop(update);
+	return 0;
 }
 

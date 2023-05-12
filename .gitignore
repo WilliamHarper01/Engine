@@ -57,3 +57,6 @@ openal-info
 
 *.pal
 *.spr
+
+*.mem
+*.wasm
