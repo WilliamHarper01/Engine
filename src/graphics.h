@@ -60,6 +60,13 @@ public:
 	~Texture();
 };
 
+class Model {
+public:
+	void* handle;
+	void create(std::string filename);
+	~Model();
+};
+
 struct FontGlyph {
 	int xIndex;
 	int yIndex;
@@ -89,11 +96,11 @@ public:
 	bool is3d;
 	V3 pos, rot, scale;
 	Color color;
-	void* handle;
+	std::vector<void*> handle;
 	void (*onClick)(Render *, int) = nullptr;
 	void (*onClickDown)(Render *, int) = nullptr;
 	~Render();
-	void create(Mesh& mesh, Texture& tex);
+	void create(Model & model);
 	void create(Texture& tex);
 	void create(Font& font, Goodstr & unicodeText);
 	void updateText(Font& font, Goodstr & text);

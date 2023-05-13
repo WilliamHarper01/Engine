@@ -4,7 +4,7 @@
 Color clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
 
 std::vector<Render*> objects = {};
-V3 cameraPos(-5.0f, 0.0f, 1.5f);
+V3 cameraPos(-5.0f, 0.0f, 0.0f);
 V3 cameraLook(1.0f, 0.0f, 0.0f);
 
 void createWindow() {
@@ -123,30 +123,33 @@ bool renderFrame() {
     {
         if (i->is3d)
         {
-            VkRender3d* r = (VkRender3d*)i->handle;
-            r->transform.model = glm::translate(glm::mat4(1.0),
-                glm::vec3(0.0, 0.0, 0.0));
-            r->transform.model = glm::scale(r->transform.model,
-                glm::vec3(1.0, 1.0, 1.0));
-            r->transform.model = glm::rotate(r->transform.model, i->rot.x,
-                glm::vec3(1.0, 0.0, 0.0));
-            r->transform.model = glm::rotate(r->transform.model, i->rot.y,
-                glm::vec3(0.0, 1.0, 0.0));
-            r->transform.model = glm::rotate(r->transform.model, i->rot.z,
-                glm::vec3(0.0, 0.0, 1.0));
-            r->transform.view = glm::lookAt(glm::vec3(cameraPos.x, cameraPos.y, cameraPos.z),
-                glm::vec3(cameraLook.x, cameraLook.y, cameraLook.z),
-                glm::vec3(0.0f, 0.0f, 1.0f));
+            for (int j=0; j<i->handle.size(); j++)
+            {
+                VkRender3d* r = (VkRender3d*)i->handle[j];
+                r->transform.model = glm::translate(glm::mat4(1.0),
+                    glm::vec3(0.0, 0.0, 0.0));
+                r->transform.model = glm::scale(r->transform.model,
+                    glm::vec3(1.0, 1.0, 1.0));
+                r->transform.model = glm::rotate(r->transform.model, i->rot.x,
+                    glm::vec3(1.0, 0.0, 0.0));
+                r->transform.model = glm::rotate(r->transform.model, i->rot.y,
+                    glm::vec3(0.0, 1.0, 0.0));
+                r->transform.model = glm::rotate(r->transform.model, i->rot.z,
+                    glm::vec3(0.0, 0.0, 1.0));
+                r->transform.view = glm::lookAt(glm::vec3(cameraPos.x, cameraPos.y, cameraPos.z),
+                    glm::vec3(cameraLook.x, cameraLook.y, cameraLook.z),
+                    glm::vec3(0.0f, 0.0f, 1.0f));
 
-            r->transform.pos = glm::vec2(i->pos.x, i->pos.y);
-            r->transform.depth = i->pos.z;
-            r->transform.size = glm::vec2(i->scale.x, i->scale.y);
-            r->transform.color = {i->color.r, i->color.g, i->color.b, i->color.a};
+                r->transform.pos = glm::vec2(i->pos.x, i->pos.y);
+                r->transform.depth = i->pos.z;
+                r->transform.size = glm::vec2(i->scale.x, i->scale.y);
+                r->transform.color = {i->color.r, i->color.g, i->color.b, i->color.a};
+            }
 
         }
         else
         {
-            VkRender* r = (VkRender*)i->handle;
+            VkRender* r = (VkRender*)i->handle[0];
             r->transform.pos = glm::vec2(i->pos.x, i->pos.y);
             r->transform.depth = i->pos.z;
             r->transform.size = glm::vec2(i->scale.x, i->scale.y);
@@ -1750,10 +1753,14 @@ void VkRender::createDescriptorSets(VkSampler* sampler)
     }
 }
 
-VkRender3d::VkRender3d(VkMesh* mesh, VkTexture* tex)
+VkRender3d::VkRender3d(GLTF * gltf, int meshIndex)
 {
-    this->tex = tex;
-    this->mesh = mesh;
+    if (gltf->textures.size() == 0 || gltf->meshes.size() == 0)
+        throw std::runtime_error("invalid model");
+
+    this->tex = gltf->textures[gltf->meshMatIndices[meshIndex]];
+    this->mesh = gltf->meshes[meshIndex];
+
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
@@ -1913,6 +1920,10 @@ VkTexture::VkTexture(unsigned char* pixels, int width, int height, int channels)
     loadImage(pixels, width, height, channels);
     if (channels == 4)
         createTextureImageView(VK_FORMAT_R8G8B8A8_SRGB);
+    else if (channels == 3)
+        createTextureImageView(VK_FORMAT_R8G8B8_SRGB);
+    else if (channels == 2)
+        createTextureImageView(VK_FORMAT_R8G8_SRGB);
     else
         createTextureImageView(VK_FORMAT_R8_SRGB);
     textures.push_back(this);
@@ -2013,36 +2024,26 @@ int vertexIsUnique(std::vector<Vertex> & uniqueVertices, Vertex vertex)
     return uniqueVertices.size();
 }
 
-VkMesh::VkMesh(std::string filename)
+/*
+void readMesh(std::string filename, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, glm::vec3 scale)
 {
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    //std::vector<glm::vec3> faceNormals;
-   // int faceLoop = 0;
-
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
 
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename.c_str())) {
-        
-        std::string altFilename = ROOTPATH + filename;
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, altFilename.c_str())) {
-            throw std::runtime_error(warn + err);
-        }
+        throw std::runtime_error("could not read obj");
     }
-    
-    //vertices.reserve(attrib.vertices.size()/3);
 
     for (const auto& shape : shapes) {
         for (const auto& index : shape.mesh.indices) {
             Vertex vertex{};
 
             vertex.pos = {
-                attrib.vertices[3 * index.vertex_index + 0],
-                attrib.vertices[3 * index.vertex_index + 1],
-                attrib.vertices[3 * index.vertex_index + 2]
+                attrib.vertices[3 * index.vertex_index + 0] * scale.x,
+                attrib.vertices[3 * index.vertex_index + 1] * scale.y,
+                attrib.vertices[3 * index.vertex_index + 2] * scale.z
             };
 
             vertex.texCoord = {
@@ -2055,59 +2056,133 @@ VkMesh::VkMesh(std::string filename)
                 attrib.normals[3 * index.normal_index + 1],
                 attrib.normals[3 * index.normal_index + 2]
             };
-
-            //int result = vertexIsUnique(vertices, vertex);
-
-            //if (result == vertices.size()) {
             vertices.push_back(vertex);
-            //}
             indices.push_back(indices.size());
-            
-            /*
-            if(faceLoop == 0)
-            {
-                faceNormals.push_back(
-                    {attrib.normals[3 * index.normal_index + 0],
-                     attrib.normals[3 * index.normal_index + 1],
-                     attrib.normals[3 * index.normal_index + 2] }
-                );
-            }
-            faceLoop = (faceLoop + 1) % 3;
-            */
+        
         }
         break;
     }
-/*
-    
-    for(int i=0; i<vertices.size(); i++)
+}
+*/
+
+void GLTF::bindMesh(tinygltf::Model &model, tinygltf::Mesh &mesh)
+{   
+    for (size_t i = 0; i < mesh.primitives.size(); ++i) 
     {
-        int nboors = 0;
-        glm::vec3 norm = {0.0f, 0.0f, 0.0f};
-        std::vector<int> uniques = {};
-        for (int j=0; j<faceNormals.size(); j++)
-        {
-            bool isUnique = true;
-            for (int k : uniques)
-                if (faceNormals[k] == faceNormals[j])
-                    isUnique = false;
-            
-            if (!isUnique)
-                continue;
-            
-            if (indices[j*3+0] == i || indices[j*3+1] == i || indices[j*3+2] == i)
-            {
-                nboors++;
-                norm = faceNormals[j] + norm;
-                uniques.push_back(j);
-            }
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+        
+        tinygltf::Primitive primitive = mesh.primitives[i];
+        
+        tinygltf::Accessor posAccessor = model.accessors[primitive.attributes["POSITION"]];
+        const tinygltf::BufferView& posBufferView = model.bufferViews[posAccessor.bufferView];
+        const tinygltf::Buffer& posBuffer = model.buffers[posBufferView.buffer];
+        const float* pos = reinterpret_cast<const float*>(&(posBuffer.data[posBufferView.byteOffset + posAccessor.byteOffset]));
+
+        tinygltf::Accessor texAccessor = model.accessors[primitive.attributes["TEXCOORD_0"]];
+        const tinygltf::BufferView& texBufferView = model.bufferViews[texAccessor.bufferView];
+        const tinygltf::Buffer& texBuffer = model.buffers[texBufferView.buffer];
+        const float* tex = reinterpret_cast<const float*>(&(texBuffer.data[texBufferView.byteOffset + texAccessor.byteOffset]));
+
+        tinygltf::Accessor normAccessor = model.accessors[primitive.attributes["NORMAL"]];
+        const tinygltf::BufferView& normBufferView = model.bufferViews[normAccessor.bufferView];
+        const tinygltf::Buffer& normBuffer = model.buffers[normBufferView.buffer];
+        const float* norm = reinterpret_cast<const float*>(&(normBuffer.data[normBufferView.byteOffset + normAccessor.byteOffset]));
+
+        int count = posAccessor.count;
+        int numComponents = posAccessor.type == TINYGLTF_TYPE_VEC3 ? 3 : 2;
+
+        if (numComponents != 3)
+            throw std::runtime_error("must be 3d");
+
+        for (int i = 0; i < count; ++i) {
+            Vertex vert;
+            vert.pos = {pos[i * numComponents + 0], pos[i * numComponents + 1], pos[i * numComponents + 2]};
+            vert.pos *= 0.1f;
+            vert.texCoord = {tex[i * 2 + 0], tex[i * 2 + 1]};
+            vert.normal = {norm[i * numComponents + 0], norm[i * numComponents + 1], norm[i * numComponents + 2]};
+            vertices.push_back(vert);
         }
-        vertices[i].normal = glm::normalize(norm);
+
+        const tinygltf::Accessor& indexAccessor = model.accessors[primitive.indices];
+        const tinygltf::BufferView& indexBufferView = model.bufferViews[indexAccessor.bufferView];
+        const tinygltf::Buffer& indexBuffer = model.buffers[indexBufferView.buffer];
+
+        const uint16_t* index = reinterpret_cast<const uint16_t*>(&(indexBuffer.data[indexBufferView.byteOffset + indexAccessor.byteOffset]));
+        int indexCount = indexAccessor.count;
+
+        for (int i = 0; i < indexCount; i++) {
+            indices.push_back((uint32_t)index[i]);
+        }
+
+        VkMesh * vkMesh = new VkMesh(vertices, indices);
+        this->meshes.push_back(vkMesh);
+
+        const tinygltf::Material& material = model.materials[primitive.material];
+        int textureIndex = material.pbrMetallicRoughness.baseColorTexture.index;
+
+        this->meshMatIndices.push_back(textureIndex);
+    }
+}
+
+void GLTF::readGLTFNode(tinygltf::Model &model, tinygltf::Node &node)
+{
+    if ((node.mesh >= 0) && (node.mesh < model.meshes.size())) {
+        bindMesh(model, model.meshes[node.mesh]);
     }
     
-*/
-    createVertexBuffer(vertices);
-    createIndexBuffer(indices);
-    meshes.push_back(this);
+    for (size_t i = 0; i < node.children.size(); i++)
+    {
+        assert((node.children[i] >= 0) && (node.children[i] < model.nodes.size()));
+        readGLTFNode(model, model.nodes[node.children[i]]);
+    }
+}
+
+void GLTF::readGLTF(std::string filename)
+{
+    tinygltf::TinyGLTF loader;
+    std::string err;
+    std::string warn;
+    tinygltf::Model model;
+
+    bool res = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
+    
+    if (!warn.empty()) std::cout << "WARN: " << warn << std::endl;
+    if (!err.empty()) std::cout << "ERR: " << err << std::endl;
+    if (!res) throw std::runtime_error("Failed to load glTF: " + filename);
+
+    for (int i=0; i<model.textures.size(); i++)
+    {
+        tinygltf::Texture &tex = model.textures[i];
+
+        if (tex.source > -1) {
+            tinygltf::Image &image = model.images[tex.source];
+            VkTexture* tex = new VkTexture(&image.image.at(0), image.width, image.height, image.component);
+            this->textures.push_back(tex);
+        }
+    }
+
+    const tinygltf::Scene &scene = model.scenes[model.defaultScene];
+    for (size_t i = 0; i < scene.nodes.size(); i++)
+    {
+        assert((scene.nodes[i] >= 0) && (scene.nodes[i] < model.nodes.size()));
+        readGLTFNode(model, model.nodes[scene.nodes[i]]);
+    }
+
+    //testTex = this->textures[this->textures.size() - 1];
+
+}
+
+GLTF::~GLTF()
+{
+    for (int i=0; i<this->meshes.size(); i++)
+    {
+        delete this->meshes[i];
+    }
+    for (int i=0; i<this->textures.size(); i++)
+    {
+        delete this->textures[i];
+    }
 }
 
 VkMesh::VkMesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices)
@@ -2189,7 +2264,7 @@ VkMVP::VkMVP()
     view = glm::lookAt(glm::vec3(-2.0f, 0.0f, 0.75f), glm::vec3(0.0f, 0.0f, 0.0f), 
         glm::vec3(0.0f, 0.0f, 1.0f));
     proj = glm::perspective(glm::radians(45.0f),
-        swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+        swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 1000.0f);
     proj[1][1] *= -1;
 
     pos = { 0.0f, 0.0f };
@@ -2202,8 +2277,8 @@ VkMVP::VkMVP()
 
 void Mesh::create(std::string filename)
 {
-    VkMesh* m = new VkMesh(filename);
-    this->handle = m;
+    //VkMesh* m = new VkMesh(filename);
+    //this->handle = m;
 }
 
 Mesh::~Mesh()
@@ -2232,11 +2307,13 @@ Render::~Render()
 {
     if (isCreated) {
         if (is3d) {
-            VkRender3d* del = (VkRender3d*)this->handle;
-            delete del;
+            for (int i=0; i<this->handle.size(); i++){
+                VkRender3d* del = (VkRender3d*)this->handle[i];
+                delete del;
+            }
         }
         else {
-            VkRender* del = (VkRender*)this->handle;
+            VkRender* del = (VkRender*)this->handle[0];
             if (del->mesh != nullptr && del->mesh != quad)
                 delete del->mesh;
             delete del;
@@ -2250,10 +2327,15 @@ Render::~Render()
     }
 }
 
-void Render::create(Mesh& mesh, Texture& tex)
+void Render::create(Model & model)
 {
-    VkRender3d* r = new VkRender3d((VkMesh*)mesh.handle, (VkTexture*)tex.handle);
-    this->handle = r;
+    GLTF* gltf = (GLTF*)model.handle;
+    this->handle.resize(gltf->meshes.size());
+    for (int i=0; i<this->handle.size(); i++)
+    {
+        VkRender3d* r = new VkRender3d((GLTF*)model.handle, i);
+        this->handle[i] = r;
+    }
     is3d = true;
     scale.x = 1.0;
     scale.y = 1.0;
@@ -2265,9 +2347,10 @@ void Render::create(Mesh& mesh, Texture& tex)
 
 void Render::create(Texture& tex)
 {
+    this->handle.resize(1);
     VkRender* r = new VkRender((VkTexture*)tex.handle);
     r->mesh = quad;
-    this->handle = r;
+    this->handle[0] = r;
     is3d = false;
     scale.x = 1.0;
     scale.y = 1.0;
@@ -2278,7 +2361,7 @@ void Render::create(Texture& tex)
 
 void Render::updateText(Font & font, Goodstr & unicodeText)
 {   
-    VkRender * r = (VkRender*)this->handle;
+    VkRender * r = (VkRender*)this->handle[0];
 
     if (r->mesh != nullptr)
         delete r->mesh;
@@ -2364,7 +2447,8 @@ void Render::updateText(Font & font, Goodstr & unicodeText)
 void Render::create(Font & font, Goodstr & unicodeText)
 {
     VkRender* r = new VkRender((VkTexture*)font.tex.handle);
-    this->handle = r;
+    this->handle.resize(1);
+    this->handle[0] = r;
     
     updateText(font, unicodeText);
 
@@ -2528,4 +2612,16 @@ bool getKeyDown(char key)
     if (key >= 97 && key <= 122)
         key -= 32;
     return glfwGetKey(window, (int)key) == GLFW_PRESS;
+}
+
+void Model::create(std::string filename)
+{
+    GLTF * gltf = new GLTF();
+    gltf->readGLTF(filename);
+    this->handle = gltf;
+}
+
+Model::~Model()
+{
+    delete (GLTF*) this->handle;
 }

@@ -57,6 +57,8 @@ target_include_directories(Engine PUBLIC extern/glm)
 #add tinyloader to the project
 target_include_directories(Engine PUBLIC extern/tinyL)
 
+target_include_directories(Engine PUBLIC extern/tinygltf)
+
 #add freetype to the project
 add_subdirectory(extern/freetype)
 target_include_directories(Engine PUBLIC extern/freetype/include)

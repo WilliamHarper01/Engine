@@ -261,6 +261,9 @@ void snesGraphicsEditor(int argc, char** argv)
         
     initGraphics();
 
+    Model m;
+    m.create("model.glb");
+
     f.fontSize = 72;
     f.createFont("Roboto-Regular.ttf", Font::getAscii());
     f.spaceLength = 0.33f;

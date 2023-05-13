@@ -6,7 +6,7 @@
 	#include "audio.h"
 #endif
 
-Mesh cube;
+Model model;
 Texture tex;
 Render cubeRender;
 
@@ -23,7 +23,7 @@ void update()
     static double curr = 0;
     curr = currTime();
 
-    cubeRender.rot.z += (curr - lastTime);
+    cubeRender.rot.x += curr - lastTime;
     lastTime = curr;
 }
 
@@ -32,12 +32,10 @@ int cubespin(int argc, char** argv)
     createWindow();
     initGraphics();
 
-    cube.create("webbuild/assets/cube.obj");
-    tex.create(pixels, 2, 2);
-    //tex.create("tex.jpg");
-    cubeRender.create(cube, tex);
-    cubeRender.scale = V3(0.1f, 0.1f, 1.0f);
-    cubeRender.pos = V3(0.5f, 0.0f, 1.0f);
+    model.create("E:/VisualStudio/Engine/model.glb");
+    cubeRender.create(model);
+    cubeRender.scale = V3(1.0f, 1.0f, 1.0f);
+    cubeRender.pos = V3(0.0f, 0.0f, 1.0f);
 
     startLoop(update);
     

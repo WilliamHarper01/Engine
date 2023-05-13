@@ -60,3 +60,5 @@ openal-info
 
 *.mem
 *.wasm
+
+*.glb

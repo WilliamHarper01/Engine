@@ -1,13 +1,15 @@
 #pragma once
 
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define TINYGLTF_IMPLEMENTATION
+#include <tiny_gltf.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#define TINYOBJLOADER_IMPLEMENTATION
-#include <tiny_obj_loader.h>
+//#define TINYOBJLOADER_IMPLEMENTATION
+//#include <tiny_obj_loader.h>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -101,7 +103,6 @@ public:
     VkBuffer indexBuffer;
     VmaAllocation indexBufferMemory;
     uint32_t indices;
-    VkMesh(std::string filename);
     VkMesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
     ~VkMesh();
     void createVertexBuffer(std::vector<Vertex>& vertices);
@@ -177,6 +178,18 @@ public:
     void createDescriptorSets(VkSampler* sampler);
 };
 
+class GLTF {
+public:
+	std::vector<VkMesh*> meshes;
+	std::vector<VkTexture*> textures;
+    std::vector<int> meshMatIndices;
+	
+	void readGLTF(std::string filename);
+	void readGLTFNode(tinygltf::Model &model, tinygltf::Node &node);
+	void bindMesh(tinygltf::Model &model, tinygltf::Mesh &mesh);
+    ~GLTF();
+};
+
 class VkRender3d {
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformBuffersMemory;
@@ -187,7 +200,7 @@ public:
     VkMesh* mesh;
     std::vector<VkDescriptorSet> descriptorSets;
 
-    VkRender3d(VkMesh* mesh, VkTexture* tex);
+    VkRender3d(GLTF * gltf, int meshIndex);
     ~VkRender3d();
 
     void cleanupSwapChain();
